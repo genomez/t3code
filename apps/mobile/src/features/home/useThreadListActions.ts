@@ -6,7 +6,6 @@ import { useCallback, useRef } from "react";
 import { Alert, Platform } from "react-native";
 
 import { showConfirmDialog } from "../../components/ConfirmDialogHost";
-import type { ThreadListAction } from "../../lib/adaptive-navigation";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { refreshArchivedThreadsForEnvironment } from "../archive/useArchivedThreadSnapshots";
 import {
@@ -62,9 +61,9 @@ function environmentSupportsTitleRegeneration(
   );
 }
 
-type ThreadMutationAction = Exclude<ThreadListAction, "snooze" | "unsnooze">;
+type ThreadListAction = "archive" | "unarchive" | "delete" | "settle" | "unsettle";
 
-const ACTION_VERBS: Record<ThreadMutationAction, string> = {
+const ACTION_VERBS: Record<ThreadListAction, string> = {
   archive: "archived",
   unarchive: "unarchived",
   delete: "deleted",
@@ -72,7 +71,7 @@ const ACTION_VERBS: Record<ThreadMutationAction, string> = {
   unsettle: "un-settled",
 };
 
-function actionFailureMessage(action: ThreadMutationAction, cause: Cause.Cause<unknown>): string {
+function actionFailureMessage(action: ThreadListAction, cause: Cause.Cause<unknown>): string {
   const error = Cause.squash(cause);
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message;
@@ -84,7 +83,7 @@ function selectionHaptic(): void {
   void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 }
 
-function actionFailureTitle(action: ThreadMutationAction): string {
+function actionFailureTitle(action: ThreadListAction): string {
   if (action === "archive") return "Could not archive thread";
   if (action === "unarchive") return "Could not unarchive thread";
   if (action === "settle") return "Could not settle thread";
@@ -104,7 +103,7 @@ function useThreadActionExecutor(
   const inFlightThreadKeys = useRef(new Set<string>());
 
   const executeAction = useCallback(
-    async (action: ThreadMutationAction, thread: EnvironmentThreadShell) => {
+    async (action: ThreadListAction, thread: EnvironmentThreadShell) => {
       const key = scopedThreadKey(thread.environmentId, thread.id);
       if (inFlightThreadKeys.current.has(key)) {
         return false;
@@ -201,7 +200,7 @@ function useThreadActionExecutor(
 }
 
 function useConfirmDeleteThread(
-  executeAction: (action: ThreadMutationAction, thread: EnvironmentThreadShell) => Promise<boolean>,
+  executeAction: (action: ThreadListAction, thread: EnvironmentThreadShell) => Promise<boolean>,
 ) {
   return useCallback(
     (thread: EnvironmentThreadShell) => {
@@ -234,9 +233,7 @@ function useConfirmDeleteThread(
   );
 }
 
-export function useThreadListActions(
-  onCompleted?: (action: ThreadListAction, thread: EnvironmentThreadShell) => void,
-): {
+export function useThreadListActions(): {
   readonly archiveThread: (thread: EnvironmentThreadShell) => void;
   readonly confirmDeleteThread: (thread: EnvironmentThreadShell) => void;
   readonly settleThread: (thread: EnvironmentThreadShell) => Promise<boolean>;
@@ -251,7 +248,7 @@ export function useThreadListActions(
   ) => Promise<boolean>;
   readonly regenerateThreadTitle: (thread: EnvironmentThreadShell) => Promise<boolean>;
 } {
-  const executeAction = useThreadActionExecutor(onCompleted);
+  const executeAction = useThreadActionExecutor();
   const snoozeMutation = useAtomCommand(threadEnvironment.snooze, { reportFailure: false });
   const unsnoozeMutation = useAtomCommand(threadEnvironment.unsnooze, { reportFailure: false });
   const pinMutation = useAtomCommand(threadEnvironment.pin, { reportFailure: false });
@@ -315,13 +312,12 @@ export function useThreadListActions(
           );
           return false;
         }
-        onCompleted?.("snooze", thread);
         return true;
       } finally {
         snoozeInFlightThreadKeys.current.delete(key);
       }
     },
-    [onCompleted, snoozeMutation],
+    [snoozeMutation],
   );
   const unsnoozeThread = useCallback(
     async (thread: EnvironmentThreadShell) => {
@@ -354,13 +350,12 @@ export function useThreadListActions(
           );
           return false;
         }
-        onCompleted?.("unsnooze", thread);
         return true;
       } finally {
         snoozeInFlightThreadKeys.current.delete(key);
       }
     },
-    [onCompleted, unsnoozeMutation],
+    [unsnoozeMutation],
   );
   const unsettleThread = useCallback(
     async (thread: EnvironmentThreadShell) => (await executeAction("unsettle", thread)) === true,
