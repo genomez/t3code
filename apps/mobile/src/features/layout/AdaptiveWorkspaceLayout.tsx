@@ -505,6 +505,10 @@ function AdaptiveWorkspaceLayoutContent(
     });
   }, [navigation]);
 
+  const handleStartNewTask = useCallback(() => {
+    navigation.navigate("NewTaskSheet", { screen: "NewTask" });
+  }, [navigation]);
+
   // Minted here (root stack navigation) so the sidebar pane stays free of
   // navigation hooks — on iOS it renders inside an independent nav tree.
   const handleOpenEnvironmentSettings = useCallback(() => {

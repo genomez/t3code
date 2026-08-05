@@ -25,7 +25,7 @@ import { getConnectionAwareBrandHeaderOptions } from "./WorkspaceConnectionTitle
 /* ─── Route screen ───────────────────────────────────────────────────── */
 
 export function HomeRouteScreen() {
-  const { layout, panes, togglePrimarySidebar } = useAdaptiveWorkspaceLayout();
+  const { layout } = useAdaptiveWorkspaceLayout();
   const projects = useProjects();
   const threads = useThreadShells();
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
@@ -124,8 +124,6 @@ export function HomeRouteScreen() {
         />
         <WorkspaceEmptyDetail
           onStartNewTask={() => navigation.navigate("NewTaskSheet", { screen: "NewTask" })}
-          onToggleSidebar={Platform.OS === "android" ? togglePrimarySidebar : undefined}
-          primarySidebarVisible={panes.primarySidebarVisible}
         />
       </>
     );
@@ -137,10 +135,8 @@ export function HomeRouteScreen() {
     >
       <>
         {/* Restore the header after leaving split view; screen options are
-            shallow-merged. Android never mounts the native Home header (it
-            draws its own in-flow header in compact and the sidebar brand in
-            split), so only iOS re-enables it here. The brand slot also doubles
-            as the connection status surface while an environment reconnects. */}
+            shallow-merged. The brand slot also doubles as the connection
+            status surface while an environment reconnects. */}
         <NativeStackScreenOptions
           options={{
             ...getConnectionAwareBrandHeaderOptions({
@@ -150,7 +146,7 @@ export function HomeRouteScreen() {
                   params: { screen: "SettingsEnvironments" },
                 }),
             }),
-            headerShown: Platform.OS !== "android",
+            headerShown: true,
           }}
         />
         <HomeHeader
