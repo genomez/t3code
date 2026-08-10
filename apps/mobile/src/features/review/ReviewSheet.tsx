@@ -344,7 +344,8 @@ export function ReviewSheet(props: ReviewSheetProps) {
   const isAndroid = Platform.OS === "android";
   const { nativeReviewDiffStyle } = useAppearanceCodeSurface();
   useAdaptiveWorkspacePaneRole("inspector");
-  const { panes, showAuxiliaryPane, toggleAuxiliaryPane } = useAdaptiveWorkspaceLayout();
+  const { layout, panes, showAuxiliaryPane, toggleAuxiliaryPane, togglePrimarySidebar } =
+    useAdaptiveWorkspaceLayout();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { themeAppearance: selectedTheme } = useAppearancePreferences();
@@ -660,6 +661,21 @@ export function ReviewSheet(props: ReviewSheetProps) {
           title="Review changes"
           subtitle={androidHeaderSubtitle || "Select a diff"}
           onBack={handleReturnToThread}
+          actions={
+            layout.usesSplitView
+              ? [
+                  {
+                    accessibilityLabel: panes.primarySidebarVisible
+                      ? "Hide thread sidebar"
+                      : "Show thread sidebar",
+                    icon: panes.primarySidebarVisible
+                      ? "arrow.up.left.and.arrow.down.right"
+                      : "sidebar.left",
+                    onPress: togglePrimarySidebar,
+                  },
+                ]
+              : undefined
+          }
           trailing={
             showSectionToolbar ? (
               <ControlPillMenu
