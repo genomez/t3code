@@ -11,6 +11,8 @@ import {
 } from "../../native/backgroundConnection";
 import { SettingsSection } from "../settings/components/SettingsSection";
 import { SettingsSwitchRow } from "../settings/components/SettingsSwitchRow";
+import { requestAgentNotificationPermission } from "../agent-awareness/notificationPermissions";
+import { runtime } from "../../lib/runtime";
 import {
   backgroundConnectionStatusLabel,
   shouldRequestBackgroundConnectionBatteryExemption,
@@ -63,6 +65,23 @@ export function BackgroundConnectionSettingsSection() {
       }
       setChanging(true);
       setStatus((current) => ({ ...current, enabled }));
+      if (enabled) {
+        const permissionResult = await runtime.runPromiseExit(requestAgentNotificationPermission);
+        if (permissionResult._tag === "Failure") {
+          console.error(
+            "[background-connection] notification permission request failed",
+            permissionResult.cause,
+          );
+        } else if (
+          permissionResult.value.type === "denied" &&
+          !permissionResult.value.canAskAgain
+        ) {
+          Alert.alert(
+            "Notifications are disabled",
+            "Background work will stay connected, but Android will not alert you until notifications are enabled in Settings.",
+          );
+        }
+      }
       const next = await setBackgroundConnectionEnabled(enabled);
       setStatus(next);
       setChanging(false);

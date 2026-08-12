@@ -1,4 +1,4 @@
-import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
+import type { EnvironmentId, OrchestrationThread, ScopedThreadRef } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, type AtomRegistry } from "effect/unstable/reactivity";
 
@@ -13,6 +13,10 @@ import {
   subscribeBackgroundConnectionRetainedThread,
 } from "./retained-thread";
 import { selectBackgroundConnectionThreadTargets } from "./target-selection";
+import {
+  isAgentTurnSettlement,
+  type AgentTurnSnapshot,
+} from "../agent-awareness/localNotificationPolicy";
 
 interface DetailLease {
   readonly ref: ScopedThreadRef;
@@ -103,6 +107,8 @@ export function createBackgroundConnectionRoot(
       }
       const atom = environmentThreads.stateAtom(ref.environmentId, ref.threadId);
       let subscribedRelease: (() => void) | null = null;
+      let hasObservedDetail = false;
+      let previousTurn: AgentTurnSnapshot | null = null;
       const lease: DetailLease = {
         ref,
         release: () => subscribedRelease?.(),
@@ -114,10 +120,36 @@ export function createBackgroundConnectionRoot(
       subscribedRelease = registry.subscribe(
         atom,
         (result) => {
-          const state = Option.getOrNull(AsyncResult.value(result));
+          const state = Option.getOrNull(AsyncResult.value(result)) as {
+            readonly status?: string;
+            readonly data?: Option.Option<OrchestrationThread>;
+          } | null;
           if (state?.status === "deleted") {
             clearRetainedIfCurrent(ref);
+            return;
           }
+          const thread = state?.data === undefined ? null : Option.getOrNull(state.data);
+          const nextTurn = thread?.latestTurn
+            ? {
+                completedAt: thread.latestTurn.completedAt,
+                state: thread.latestTurn.state,
+                turnId: thread.latestTurn.turnId,
+              }
+            : null;
+          if (hasObservedDetail && isAgentTurnSettlement(previousTurn, nextTurn) && thread) {
+            void import("../agent-awareness/localNotifications")
+              .then(({ scheduleAndroidAgentCompletionNotification }) =>
+                scheduleAndroidAgentCompletionNotification({
+                  environmentId: ref.environmentId,
+                  thread,
+                }),
+              )
+              .catch((error) => {
+                console.error("[background-connection] failed to schedule agent notification", error);
+              });
+          }
+          previousTurn = nextTurn;
+          hasObservedDetail = true;
         },
         { immediate: true },
       );

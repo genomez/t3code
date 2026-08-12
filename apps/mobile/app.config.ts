@@ -98,6 +98,9 @@ function resolveAppVariant(value: string | undefined): AppVariant {
 }
 
 const variant = VARIANT_CONFIG[APP_VARIANT];
+const appName = process.env.T3_ANDROID_APP_NAME?.trim() || variant.appName;
+const androidPackage =
+  process.env.T3_ANDROID_PACKAGE_OVERRIDE?.trim() || variant.androidPackage;
 const iosBundleIdentifier = isIosPersonalTeamBuild
   ? personalTeamBundleIdentifier!
   : variant.iosBundleIdentifier;
@@ -157,7 +160,7 @@ const sharingPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
 // family names without waiting for runtime font loading.
 
 const config: ExpoConfig = {
-  name: variant.appName,
+  name: appName,
   slug: "t3-code",
   platforms: ["ios", "android"],
   scheme: variant.scheme,
@@ -219,7 +222,7 @@ const config: ExpoConfig = {
   },
   android: {
     icon: variant.assets.appIcon,
-    package: variant.androidPackage,
+    package: androidPackage,
     adaptiveIcon: {
       backgroundColor: variant.assets.androidAdaptiveBackgroundColor,
       foregroundImage: variant.assets.androidAdaptiveForeground,
