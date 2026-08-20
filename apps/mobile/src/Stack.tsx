@@ -13,7 +13,7 @@ import {
   type NativeStackNavigationOptions,
 } from "@react-navigation/native-stack";
 import { useCallback, useEffect, useRef } from "react";
-import { Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { DynamicColorIOS, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useResolveClassNames } from "uniwind";
 
 import { AppText as Text } from "./components/AppText";
@@ -80,6 +80,13 @@ import { FORM_SHEET_PRESENTATION_OPTIONS } from "./native/sheet-surface";
 import { useThreadOutboxDrain } from "./state/use-thread-outbox-drain";
 
 const HEADER_SCROLL_EDGE_EFFECTS = nativeHeaderScrollEdgeEffects(Platform.OS, Platform.Version);
+
+// Matches --color-sheet in global.css (light/dark). DynamicColorIOS lets the
+// native stack retain an opaque adaptive sheet surface on iOS.
+const SHEET_BACKGROUND_COLOR =
+  Platform.OS === "ios"
+    ? DynamicColorIOS({ light: "rgba(242, 242, 247, 0.98)", dark: "rgba(14, 14, 14, 0.98)" })
+    : undefined;
 
 type AppScreenOptions = NativeStackNavigationOptions & {
   readonly unstable_navigationItemStyle?: "editor";
