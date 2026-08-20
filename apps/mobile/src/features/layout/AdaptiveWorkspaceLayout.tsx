@@ -588,10 +588,6 @@ function AdaptiveWorkspaceLayoutContent(
     });
   }, [navigation]);
 
-  const handleStartNewTask = useCallback(() => {
-    navigation.navigate("NewTaskSheet", { screen: "NewTask" });
-  }, [navigation]);
-
   const handleNewThreadInProject = useCallback(
     (project: EnvironmentProject) => {
       navigation.navigate("NewTaskSheet", {
