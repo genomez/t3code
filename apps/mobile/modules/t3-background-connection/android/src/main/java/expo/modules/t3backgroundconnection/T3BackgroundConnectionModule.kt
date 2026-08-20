@@ -53,6 +53,18 @@ class T3BackgroundConnectionModule : Module() {
       T3BackgroundConnectionState.status(applicationContext())
     }
 
+    Function("setNotificationText") { text: String? ->
+      val context = applicationContext()
+      T3BackgroundConnectionState.setNotificationText(context, text)
+      T3BackgroundConnectionState.status(context)
+    }
+
+    Function("setNotificationContent") { title: String?, body: String? ->
+      val context = applicationContext()
+      T3BackgroundConnectionState.setNotificationContent(context, title, body)
+      T3BackgroundConnectionState.status(context)
+    }
+
     AsyncFunction("setEnabled") { enabled: Boolean ->
       val context = applicationContext()
       T3BackgroundConnectionState.setEnabled(context, enabled)

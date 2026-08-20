@@ -3,6 +3,8 @@ import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 
 import { buildAgentAwarenessDeepLink } from "@t3tools/shared/agentAwareness";
+import { androidAgentNotificationIdentifier } from "./localNotificationIdentifier";
+import { buildAndroidAgentNotificationText } from "./localNotificationContent";
 
 export const ANDROID_AGENT_NOTIFICATION_CHANNEL_ID = "t3-agent-updates";
 
@@ -49,7 +51,8 @@ export function ensureAndroidAgentNotificationChannel(): Promise<void> {
 
 export async function scheduleAndroidAgentCompletionNotification(input: {
   readonly environmentId: EnvironmentId;
-  readonly thread: Pick<OrchestrationThread, "id" | "title" | "latestTurn">;
+  readonly thread: Pick<OrchestrationThread, "id" | "title" | "latestTurn" | "messages">;
+  readonly silent?: boolean;
 }): Promise<void> {
   if (Platform.OS !== "android" || input.thread.latestTurn === null) {
     return;
@@ -61,10 +64,10 @@ export async function scheduleAndroidAgentCompletionNotification(input: {
   }
 
   await ensureAndroidAgentNotificationChannel();
-  const failed = input.thread.latestTurn.state === "error";
+  const notificationText = buildAndroidAgentNotificationText(input.thread);
   await Notifications.scheduleNotificationAsync({
     content: {
-      body: input.thread.title,
+      body: notificationText.body,
       color: "#7565C7",
       data: {
         deepLink: buildAgentAwarenessDeepLink({
@@ -74,11 +77,13 @@ export async function scheduleAndroidAgentCompletionNotification(input: {
         environmentId: input.environmentId,
         threadId: input.thread.id,
       },
-      priority: Notifications.AndroidNotificationPriority.HIGH,
-      sound: "default",
-      title: failed ? "Agent failed" : "Agent finished",
+      priority: input.silent
+        ? Notifications.AndroidNotificationPriority.DEFAULT
+        : Notifications.AndroidNotificationPriority.HIGH,
+      sound: input.silent ? false : "default",
+      title: notificationText.title,
     },
-    identifier: `t3-agent-${input.environmentId}-${input.thread.id}-${input.thread.latestTurn.turnId}`,
+    identifier: androidAgentNotificationIdentifier(input.environmentId, input.thread.id),
     trigger: null,
   });
 }

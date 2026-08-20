@@ -116,6 +116,18 @@ internal object T3BackgroundConnectionState {
     emitStatus()
   }
 
+  fun setNotificationText(context: Context, text: String?) {
+    initialize(context)
+    if (!serviceRunning.get()) return
+    T3BackgroundConnectionService.updateNotification(context, text)
+  }
+
+  fun setNotificationContent(context: Context, title: String?, body: String?) {
+    initialize(context)
+    if (!serviceRunning.get()) return
+    T3BackgroundConnectionService.updateNotification(context, title, body)
+  }
+
   fun markServiceRunning(running: Boolean) {
     serviceRunning.set(running)
     if (!running) {

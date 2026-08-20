@@ -8,6 +8,11 @@ export interface BackgroundConnectionStatus {
   readonly batteryOptimizationIgnored: boolean;
 }
 
+export interface BackgroundConnectionNotificationContent {
+  readonly title: string;
+  readonly body: string;
+}
+
 type BackgroundConnectionNativeEvents = {
   readonly onStatusChange: (status: BackgroundConnectionStatus) => void;
   readonly onStopRequested: () => void;
@@ -16,6 +21,11 @@ type BackgroundConnectionNativeEvents = {
 declare class BackgroundConnectionNativeModule extends NativeModule<BackgroundConnectionNativeEvents> {
   readonly getStatus?: () => BackgroundConnectionStatus;
   readonly setEnabled?: (enabled: boolean) => Promise<BackgroundConnectionStatus>;
+  readonly setNotificationText?: (text: string | null) => BackgroundConnectionStatus;
+  readonly setNotificationContent?: (
+    title: string | null,
+    body: string | null,
+  ) => BackgroundConnectionStatus;
   readonly ensureStarted?: () => BackgroundConnectionStatus;
   readonly requestBatteryOptimizationExemption?: () => Promise<BackgroundConnectionStatus>;
   readonly setRuntimeReady?: (ready: boolean) => BackgroundConnectionStatus;
@@ -75,6 +85,31 @@ export async function setBackgroundConnectionEnabled(
     return normalizeStatus(await nativeModule.setEnabled(enabled));
   } catch {
     return getBackgroundConnectionStatus();
+  }
+}
+
+export function setBackgroundConnectionNotificationText(text: string | null): void {
+  try {
+    getNativeModule()?.setNotificationText?.(text);
+  } catch {
+    // Notification status is best-effort and must not interrupt the connection.
+  }
+}
+
+export function setBackgroundConnectionNotificationContent(
+  content: BackgroundConnectionNotificationContent,
+): void {
+  try {
+    const nativeModule = getNativeModule();
+    if (nativeModule?.setNotificationContent) {
+      nativeModule.setNotificationContent(content.title, content.body);
+      return;
+    }
+    // Keep the JS bundle compatible with an older installed test APK while a
+    // native module update is being rolled out.
+    nativeModule?.setNotificationText?.(content.body);
+  } catch {
+    // Notification status is best-effort and must not interrupt the connection.
   }
 }
 
