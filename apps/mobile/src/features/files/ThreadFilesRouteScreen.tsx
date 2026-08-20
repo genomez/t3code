@@ -26,6 +26,7 @@ import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { useThreadSelection } from "../../state/use-thread-selection";
 import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
+import type { AssetUrlState } from "../../state/assets";
 import { useEnvironmentQuery } from "../../state/query";
 import { projectEnvironment } from "../../state/projects";
 import {
@@ -91,13 +92,14 @@ function defaultViewMode(path: string | null): FileViewMode {
 
 function FileContent(props: {
   readonly activeMode: FileViewMode;
-  readonly previewUri: string | null;
+  readonly previewStatus: AssetUrlState;
   readonly fileContents: string | null;
   readonly fileError: string | null;
   readonly relativePath: string;
   readonly initialLine: number | null;
   readonly truncated: boolean;
   readonly onRefresh?: () => Promise<void> | void;
+  readonly onRetryPreview: () => void;
 }) {
   const isMarkdown = isMarkdownPreviewFile(props.relativePath);
   const isBrowserFile = isBrowserPreviewFile(props.relativePath);
@@ -105,18 +107,21 @@ function FileContent(props: {
 
   if (props.activeMode === "preview" && isImageFile) {
     if (isSvgImagePreviewFile(props.relativePath)) {
-      return <WorkspaceFileWebPreview uri={props.previewUri} />;
+      return (
+        <WorkspaceFileWebPreview status={props.previewStatus} onRetry={props.onRetryPreview} />
+      );
     }
     return (
       <WorkspaceFileImagePreview
         accessibilityLabel={basename(props.relativePath)}
-        uri={props.previewUri}
+        status={props.previewStatus}
+        onRetry={props.onRetryPreview}
       />
     );
   }
 
   if (props.activeMode === "preview" && isBrowserFile) {
-    return <WorkspaceFileWebPreview uri={props.previewUri} />;
+    return <WorkspaceFileWebPreview status={props.previewStatus} onRetry={props.onRetryPreview} />;
   }
 
   if (props.fileError && props.fileContents === null) {
@@ -524,16 +529,20 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
       : defaultViewMode(relativePath);
   const resolvedActiveMode = canPreview ? activeMode : "source";
   const assetPreviewPath = isBrowserFile || isImageFile ? relativePath : null;
-  const assetPreviewUri = useWorkspaceFileAssetUrl({
+  const assetPreview = useWorkspaceFileAssetUrl({
     cwd,
     environmentId,
     relativePath: assetPreviewPath,
     threadId,
   });
-  const previewUri =
-    assetPreviewUri === null || previewRevision === 0
-      ? assetPreviewUri
-      : `${assetPreviewUri}${assetPreviewUri.includes("?") ? "&" : "?"}revision=${previewRevision}`;
+  const previewStatus: AssetUrlState =
+    assetPreview.status._tag !== "Success" || previewRevision === 0
+      ? assetPreview.status
+      : {
+          _tag: "Success",
+          url: `${assetPreview.status.url}${assetPreview.status.url.includes("?") ? "&" : "?"}revision=${previewRevision}`,
+        };
+  const assetPreviewUri = previewStatus._tag === "Success" ? previewStatus.url : null;
   const needsFileContents =
     relativePath !== null &&
     (resolvedActiveMode === "source" || isMarkdownPreviewFile(relativePath));
@@ -685,6 +694,7 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
               <NativeHeaderToolbar.MenuAction
                 icon="arrow.clockwise"
                 onPress={() => {
+                  assetPreview.retry();
                   setPreviewRevision((current) => current + 1);
                 }}
               >
@@ -695,13 +705,14 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
         </NativeHeaderToolbar>
         <FileContent
           activeMode={resolvedActiveMode}
-          previewUri={previewUri}
+          previewStatus={previewStatus}
           fileContents={fileData?.contents ?? null}
           fileError={fileQuery.error}
           initialLine={targetLine}
           relativePath={relativePath}
           truncated={fileData?.truncated ?? false}
           onRefresh={() => fileQuery.refresh()}
+          onRetryPreview={assetPreview.retry}
         />
       </View>
     </ReviewHighlighterProvider>
