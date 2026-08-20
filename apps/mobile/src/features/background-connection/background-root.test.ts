@@ -359,7 +359,9 @@ describe("background connection root", () => {
       lastFailure: null,
     });
 
-    expect(backgroundNotification.setText).toHaveBeenLastCalledWith("Reconnecting to Lenovo...");
+    expect(backgroundNotification.setContent).toHaveBeenLastCalledWith(
+      expect.objectContaining({ body: "Reconnecting to Lenovo..." }),
+    );
     root.stop();
   });
 
