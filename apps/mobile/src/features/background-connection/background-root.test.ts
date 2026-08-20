@@ -56,6 +56,7 @@ const retained = vi.hoisted(() => {
 
 const backgroundNotification = vi.hoisted(() => ({
   setText: vi.fn(),
+  setContent: vi.fn(),
 }));
 
 const agentNotification = vi.hoisted(() => ({
@@ -132,6 +133,7 @@ vi.mock("./retained-thread", () => ({
 
 vi.mock("../../native/backgroundConnection", () => ({
   setBackgroundConnectionNotificationText: backgroundNotification.setText,
+  setBackgroundConnectionNotificationContent: backgroundNotification.setContent,
 }));
 
 vi.mock("../agent-awareness/localNotifications", () => ({

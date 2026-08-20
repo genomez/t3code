@@ -25,7 +25,7 @@ describe("background notification status", () => {
           activity("Context compaction", "2026-08-12T10:00:01.000Z"),
         ],
       }, NOW),
-    ).toBe("Working");
+    ).toBe("Context compaction");
   });
 
   it("uses present-progress wording for command starts", () => {
