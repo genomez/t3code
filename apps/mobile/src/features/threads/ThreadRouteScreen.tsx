@@ -7,13 +7,15 @@ import {
 } from "@react-navigation/native";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as Option from "effect/Option";
+import { AsyncResult } from "effect/unstable/reactivity";
 import { EnvironmentId, ThreadId, type ProjectScript } from "@t3tools/contracts";
 import {
   requestOlderThreadTurns,
   threadHasOlderTurns,
 } from "@t3tools/client-runtime/state/threads";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
-import { Platform, ScrollView, View } from "react-native";
+import { AppState, Platform, ScrollView, View } from "react-native";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useWorkspaceState } from "../../state/workspace";
 import { useEnvironmentQuery } from "../../state/query";
@@ -66,6 +68,7 @@ import { useSelectedThreadRequests } from "../../state/use-selected-thread-reque
 import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
 import { useThreadComposerState } from "../../state/use-thread-composer-state";
 import { threadEnvironment } from "../../state/threads";
+import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import { projectThreadContentPresentation } from "./threadContentPresentation";
 import {
   useAdaptiveWorkspaceLayout,
@@ -78,6 +81,7 @@ import {
   ThreadInspectorContentStack,
   type ThreadInspectorMode,
 } from "./thread-inspector-content-stack";
+import { threadCompletionVisitPatch } from "./threadCompletionAttention";
 
 interface ThreadInspectorSelection {
   readonly routeThreadIdentity: string | null;
@@ -226,6 +230,25 @@ function ThreadRouteContent(
           },
     [selectedThread],
   );
+  const preferencesResult = useAtomValue(mobilePreferencesAtom);
+  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+  const markDisplayedCompletionVisited = useCallback(() => {
+    if (
+      AppState.currentState !== "active" ||
+      selectedThread === null ||
+      !AsyncResult.isSuccess(preferencesResult)
+    ) {
+      return;
+    }
+    const patch = threadCompletionVisitPatch(
+      preferencesResult.value,
+      selectedThread,
+      new Date().toISOString(),
+    );
+    if (patch !== null) {
+      savePreferences(patch);
+    }
+  }, [preferencesResult, savePreferences, selectedThread]);
   const selectedThreadDetailState = props.selectedThreadDetailState;
   const selectedThreadDetail = Option.getOrNull(selectedThreadDetailState.data);
   // "Load earlier turns" header state for windowed (paginated) thread loads.
@@ -327,6 +350,17 @@ function ThreadRouteContent(
       });
       return undefined;
     }, [displayedThreadRef]),
+  );
+  useFocusEffect(
+    useCallback(() => {
+      markDisplayedCompletionVisited();
+      const subscription = AppState.addEventListener("change", (state) => {
+        if (state === "active") {
+          markDisplayedCompletionVisited();
+        }
+      });
+      return () => subscription.remove();
+    }, [markDisplayedCompletionVisited]),
   );
   useFocusEffect(
     useCallback(() => {

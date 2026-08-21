@@ -115,7 +115,11 @@ class T3BackgroundConnectionService : HeadlessJsTaskService() {
     ) {
       val applicationContext = context.applicationContext
       createAgentNotificationChannel(applicationContext)
-      val launchIntent = Intent(Intent.ACTION_VIEW, Uri.parse(deepLink)).apply {
+      val notificationUri = Uri.parse(deepLink)
+      require(notificationUri.isAbsolute) {
+        "Agent notification deep links must be absolute URIs"
+      }
+      val launchIntent = Intent(Intent.ACTION_VIEW, notificationUri).apply {
         setPackage(applicationContext.packageName)
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
       }

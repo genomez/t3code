@@ -2,6 +2,7 @@ import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { androidAgentNotificationIdentifier } from "./localNotificationIdentifier";
+import { buildAndroidAgentNotificationDeepLinks } from "./notificationDeepLink";
 
 const environmentId = "environment-1" as EnvironmentId;
 const threadOneId = "thread-1" as ThreadId;
@@ -21,5 +22,29 @@ describe("local agent notification identifiers", () => {
     expect(androidAgentNotificationIdentifier(environmentId, threadOneId)).not.toBe(
       androidAgentNotificationIdentifier(environmentId, threadTwoId),
     );
+  });
+});
+
+describe("Android agent notification deep links", () => {
+  it("keeps the Expo route relative and gives ACTION_VIEW an absolute variant URI", () => {
+    const links = buildAndroidAgentNotificationDeepLinks(
+      { environmentId, threadId: threadOneId },
+      (path) => `t3code-preview://${path}`,
+    );
+
+    expect(links).toEqual({
+      routePath: "/threads/environment-1/thread-1",
+      nativeUri: "t3code-preview:///threads/environment-1/thread-1",
+    });
+  });
+
+  it("rejects a route-only native URI so the caller can use the Expo fallback", () => {
+    const links = buildAndroidAgentNotificationDeepLinks(
+      { environmentId, threadId: threadOneId },
+      (path) => path,
+    );
+
+    expect(links.nativeUri).toBeNull();
+    expect(links.routePath).toBe("/threads/environment-1/thread-1");
   });
 });

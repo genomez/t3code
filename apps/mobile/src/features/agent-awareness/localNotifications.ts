@@ -1,10 +1,11 @@
 import type { EnvironmentId, OrchestrationThread } from "@t3tools/contracts";
+import * as Linking from "expo-linking";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 
-import { buildAgentAwarenessDeepLink } from "@t3tools/shared/agentAwareness";
 import { androidAgentNotificationIdentifier } from "./localNotificationIdentifier";
 import { buildAndroidAgentNotificationText } from "./localNotificationContent";
+import { buildAndroidAgentNotificationDeepLinks } from "./notificationDeepLink";
 import {
   dismissBackgroundConnectionAgentNotification,
   postBackgroundConnectionAgentNotification,
@@ -70,20 +71,21 @@ export async function scheduleAndroidAgentCompletionNotification(input: {
   await ensureAndroidAgentNotificationChannel();
   const notificationText = buildAndroidAgentNotificationText(input.thread);
   const identifier = androidAgentNotificationIdentifier(input.environmentId, input.thread.id);
-  const deepLink = buildAgentAwarenessDeepLink({
-    environmentId: input.environmentId,
-    threadId: input.thread.id,
-  });
+  const deepLinks = buildAndroidAgentNotificationDeepLinks(
+    { environmentId: input.environmentId, threadId: input.thread.id },
+    Linking.createURL,
+  );
 
   // Expo's scheduler can retain separate native records even with a stable
   // JS identifier. The native tag/id route guarantees replacement per thread
   // and keeps completion alerts in a group distinct from the ongoing service.
   if (
+    deepLinks.nativeUri !== null &&
     postBackgroundConnectionAgentNotification(
       identifier,
       notificationText.title,
       notificationText.body,
-      deepLink,
+      deepLinks.nativeUri,
     )
   ) {
     return;
@@ -94,7 +96,7 @@ export async function scheduleAndroidAgentCompletionNotification(input: {
       body: notificationText.body,
       color: "#7565C7",
       data: {
-        deepLink,
+        deepLink: deepLinks.routePath,
         environmentId: input.environmentId,
         threadId: input.thread.id,
       },

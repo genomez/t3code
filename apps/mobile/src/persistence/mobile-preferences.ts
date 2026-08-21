@@ -42,6 +42,10 @@ export interface Preferences {
   readonly legacyThreadListEnabled?: boolean;
   /** Device-local counterpart of desktop's `planModeEnabled` legacy flag. */
   readonly planModeEnabled?: boolean;
+  /** First app session that supports device-local completion attention. */
+  readonly completionAttentionStartedAt?: string;
+  /** Last active, visible visit per environment-scoped thread. */
+  readonly threadLastVisitedAtById?: Readonly<Record<string, string>>;
 }
 
 export class MobilePreferencesLoadError extends Schema.TaggedErrorClass<MobilePreferencesLoadError>()(
@@ -100,6 +104,8 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     autoSettleOnMerge?: boolean;
     legacyThreadListEnabled?: boolean;
     planModeEnabled?: boolean;
+    completionAttentionStartedAt?: string;
+    threadLastVisitedAtById?: Readonly<Record<string, string>>;
   } = {};
 
   if (typeof parsed.liveActivitiesEnabled === "boolean") {
@@ -169,6 +175,24 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   }
   if (typeof parsed.planModeEnabled === "boolean") {
     preferences.planModeEnabled = parsed.planModeEnabled;
+  }
+  if (
+    typeof parsed.completionAttentionStartedAt === "string" &&
+    !Number.isNaN(Date.parse(parsed.completionAttentionStartedAt))
+  ) {
+    preferences.completionAttentionStartedAt = parsed.completionAttentionStartedAt;
+  }
+  if (
+    typeof parsed.threadLastVisitedAtById === "object" &&
+    parsed.threadLastVisitedAtById !== null &&
+    !Array.isArray(parsed.threadLastVisitedAtById)
+  ) {
+    preferences.threadLastVisitedAtById = Object.fromEntries(
+      Object.entries(parsed.threadLastVisitedAtById).filter(
+        (entry): entry is [string, string] =>
+          typeof entry[1] === "string" && !Number.isNaN(Date.parse(entry[1])),
+      ),
+    );
   }
   return preferences;
 }

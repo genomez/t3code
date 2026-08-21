@@ -23,11 +23,10 @@ export { snoozeWakeLabel };
  * Thread List v2 model, ported from the web sidebar v2
  * (apps/web/src/components/Sidebar.logic.ts + SidebarV2.tsx).
  *
- * Four visual states, three colors: color is reserved for "act now"
- * (approval), "in motion" (working), and "broken" (failed). Ready is the
- * unlabeled resting state.
+ * Completion attention is device-local: a newly completed, unvisited thread
+ * receives a Done label while ordinary ready threads remain unlabeled.
  */
-export type ThreadListV2Status = "approval" | "input" | "working" | "failed" | "ready";
+export type ThreadListV2Status = "approval" | "input" | "working" | "failed" | "done" | "ready";
 export type ThreadListV2SwipeAction = "archive" | "settle" | "unsettle" | "snooze" | "unsnooze";
 
 export function resolveThreadListV2SnoozeMenuSelection(input: {
@@ -127,6 +126,7 @@ export function resolveThreadListV2Enabled(input: {
 
 export function resolveThreadListV2Status(
   thread: Pick<EnvironmentThreadShell, "hasPendingApprovals" | "hasPendingUserInput" | "session">,
+  options: { readonly hasUnseenCompletion?: boolean } = {},
 ): ThreadListV2Status {
   if (thread.hasPendingApprovals) {
     return "approval";
@@ -139,6 +139,9 @@ export function resolveThreadListV2Status(
   }
   if (thread.session?.status === "error") {
     return "failed";
+  }
+  if (options.hasUnseenCompletion === true) {
+    return "done";
   }
   return "ready";
 }

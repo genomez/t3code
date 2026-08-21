@@ -8,7 +8,8 @@ import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { createStaticNavigation } from "@react-navigation/native";
 
-import { RegistryContext } from "@effect/atom-react";
+import { RegistryContext, useAtomSet, useAtomValue } from "@effect/atom-react";
+import { AsyncResult } from "effect/unstable/reactivity";
 import { ConfirmDialogHost } from "./components/ConfirmDialogHost";
 import { CloudAuthProvider } from "./features/cloud/CloudAuthProvider";
 import { prepareNativeShowcaseCapture } from "./features/showcase/nativeShowcaseScene";
@@ -24,6 +25,8 @@ import { appBlurTargetRef } from "./lib/appBlurTarget";
 import { useThemeColor } from "./lib/useThemeColor";
 import { useMobileNavigationTheme } from "./lib/useMobileNavigationTheme";
 import { ensureBackgroundConnectionStarted } from "./native/backgroundConnection";
+import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "./state/preferences";
+import { completionAttentionSessionStartedAt } from "./features/threads/threadCompletionAttention";
 
 import "../global.css";
 
@@ -68,10 +71,26 @@ function BackgroundConnectionServiceCoordinator() {
   return null;
 }
 
+function CompletionAttentionCoordinator() {
+  const preferencesResult = useAtomValue(mobilePreferencesAtom);
+  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+
+  useEffect(() => {
+    if (
+      AsyncResult.isSuccess(preferencesResult) &&
+      preferencesResult.value.completionAttentionStartedAt === undefined
+    ) {
+      savePreferences({ completionAttentionStartedAt: completionAttentionSessionStartedAt });
+    }
+  }, [preferencesResult, savePreferences]);
+  return null;
+}
+
 export default function App() {
   return (
     <RegistryContext.Provider value={appAtomRegistry}>
       <BackgroundConnectionServiceCoordinator />
+      <CompletionAttentionCoordinator />
       <CloudAuthProvider>
         <AppearancePreferencesProvider>
           <AppContent />
