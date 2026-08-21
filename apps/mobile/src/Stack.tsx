@@ -13,11 +13,20 @@ import {
   type NativeStackNavigationOptions,
 } from "@react-navigation/native-stack";
 import { useCallback, useEffect, useRef } from "react";
-import { DynamicColorIOS, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import {
+  AppState,
+  DynamicColorIOS,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from "react-native";
 import { useResolveClassNames } from "uniwind";
 
 import { AppText as Text } from "./components/AppText";
 import { getCompactBrandHeaderOptions } from "./components/CompactBrandTitle";
+import { dismissAndroidAgentCompletionNotification } from "./features/agent-awareness/localNotifications";
 import { ArchivedThreadsRouteScreen } from "./features/archive/ArchivedThreadsRouteScreen";
 import { useAgentNotificationNavigation } from "./features/agent-awareness/notificationNavigation";
 import { ConnectOnboardingRouteScreen } from "./features/cloud/ConnectOnboardingRouteScreen";
@@ -447,7 +456,20 @@ function RootStackLayout(props: {
     if (Platform.OS !== "android" || activeThread === null) {
       return;
     }
-    void saveBackgroundConnectionRetainedThread(activeThread);
+
+    const handleActiveThread = () => {
+      void saveBackgroundConnectionRetainedThread(activeThread);
+      void dismissAndroidAgentCompletionNotification(activeThread);
+    };
+
+    handleActiveThread();
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") {
+        handleActiveThread();
+      }
+    });
+
+    return () => subscription.remove();
   }, [activeThread?.environmentId, activeThread?.threadId]);
 
   return (

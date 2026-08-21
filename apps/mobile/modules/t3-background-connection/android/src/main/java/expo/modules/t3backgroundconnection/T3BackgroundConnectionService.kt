@@ -9,6 +9,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
 import com.facebook.react.HeadlessJsTaskService
@@ -82,6 +83,11 @@ class T3BackgroundConnectionService : HeadlessJsTaskService() {
     const val DEFAULT_NOTIFICATION_TEXT = "Connected in background"
     const val NOTIFICATION_CHANNEL_ID = "t3code_background_connection"
     const val NOTIFICATION_ID = 0x7433
+    private const val AGENT_NOTIFICATION_CHANNEL_ID = "t3-agent-updates"
+    private const val AGENT_NOTIFICATION_GROUP = "t3-agent-updates"
+    private const val AGENT_NOTIFICATION_TAG_PREFIX = "t3-agent-"
+    private const val AGENT_NOTIFICATION_SUMMARY_TAG = "t3-agent-summary"
+    private const val AGENT_NOTIFICATION_SUMMARY_ID = 0x7434
 
     internal fun updateNotification(context: Context, text: String?) {
       updateNotification(context, DEFAULT_NOTIFICATION_TITLE, text)
@@ -93,6 +99,67 @@ class T3BackgroundConnectionService : HeadlessJsTaskService() {
       applicationContext
         .getSystemService(NotificationManager::class.java)
         .notify(NOTIFICATION_ID, buildNotification(applicationContext, title, text))
+    }
+
+    /**
+     * Completion notifications are posted through a stable tag/id pair. This
+     * replaces the older alert for the same thread without touching alerts for
+     * other threads or the foreground-service notification.
+     */
+    internal fun postAgentNotification(
+      context: Context,
+      tag: String,
+      title: String,
+      body: String,
+      deepLink: String,
+    ) {
+      val applicationContext = context.applicationContext
+      createAgentNotificationChannel(applicationContext)
+      val launchIntent = Intent(Intent.ACTION_VIEW, Uri.parse(deepLink)).apply {
+        setPackage(applicationContext.packageName)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+      }
+      val contentIntent = PendingIntent.getActivity(
+        applicationContext,
+        tag.hashCode(),
+        launchIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+      )
+      val notification = buildAgentNotification(
+        applicationContext,
+        title,
+        body,
+        contentIntent,
+        isSummary = false,
+      )
+      val manager = applicationContext.getSystemService(NotificationManager::class.java)
+      manager.notify(tag, 0, notification)
+      manager.notify(
+        AGENT_NOTIFICATION_SUMMARY_TAG,
+        AGENT_NOTIFICATION_SUMMARY_ID,
+        buildAgentNotification(
+          applicationContext,
+          title,
+          body,
+          contentIntent,
+          isSummary = true,
+        ),
+      )
+    }
+
+    /** Remove a single completion alert and its summary only when empty. */
+    internal fun dismissAgentNotification(context: Context, tag: String) {
+      val applicationContext = context.applicationContext
+      val manager = applicationContext.getSystemService(NotificationManager::class.java)
+      manager.cancel(tag, 0)
+      val hasRemainingAgentNotification = manager.activeNotifications.any {
+        it.packageName == applicationContext.packageName &&
+          it.id == 0 &&
+          it.tag?.startsWith(AGENT_NOTIFICATION_TAG_PREFIX) == true
+      }
+      if (!hasRemainingAgentNotification) {
+        manager.cancel(AGENT_NOTIFICATION_SUMMARY_TAG, AGENT_NOTIFICATION_SUMMARY_ID)
+      }
     }
 
     private fun createNotificationChannel(context: Context) {
@@ -110,6 +177,63 @@ class T3BackgroundConnectionService : HeadlessJsTaskService() {
         lockscreenVisibility = Notification.VISIBILITY_PRIVATE
       }
       context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+    }
+
+    private fun createAgentNotificationChannel(context: Context) {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+      val channel = NotificationChannel(
+        AGENT_NOTIFICATION_CHANNEL_ID,
+        "T3 agent updates",
+        NotificationManager.IMPORTANCE_DEFAULT,
+      ).apply {
+        enableLights(true)
+        lightColor = 0xff7565c7.toInt()
+        enableVibration(true)
+        vibrationPattern = longArrayOf(0, 250, 250, 250)
+        setShowBadge(true)
+        lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+      }
+      context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+    }
+
+    private fun buildAgentNotification(
+      context: Context,
+      title: String,
+      body: String,
+      contentIntent: PendingIntent,
+      isSummary: Boolean,
+    ): Notification {
+      val smallIcon =
+        context.resources.getIdentifier("notification_icon", "drawable", context.packageName)
+          .takeIf { it != 0 }
+          ?: android.R.drawable.stat_notify_sync_noanim
+      return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        Notification.Builder(context, AGENT_NOTIFICATION_CHANNEL_ID)
+      } else {
+        @Suppress("DEPRECATION")
+        Notification.Builder(context)
+      }.apply {
+        setContentTitle(normalizeNotificationTitle(title))
+        setContentText(normalizeNotificationText(body))
+        setStyle(Notification.BigTextStyle().bigText(normalizeNotificationText(body)))
+        setSmallIcon(smallIcon)
+        setColor(0xff7565c7.toInt())
+        setAutoCancel(true)
+        setOnlyAlertOnce(true)
+        setShowWhen(true)
+        setGroup(AGENT_NOTIFICATION_GROUP)
+        setContentIntent(contentIntent)
+        if (isSummary) {
+          setGroupSummary(true)
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            setGroupAlertBehavior(Notification.GROUP_ALERT_CHILDREN)
+          }
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+          @Suppress("DEPRECATION")
+          setPriority(Notification.PRIORITY_HIGH)
+        }
+      }.build()
     }
 
     private fun buildNotification(context: Context, title: String?, text: String?): Notification {

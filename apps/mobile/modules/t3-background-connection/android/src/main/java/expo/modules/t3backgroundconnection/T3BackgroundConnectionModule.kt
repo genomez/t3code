@@ -65,6 +65,20 @@ class T3BackgroundConnectionModule : Module() {
       T3BackgroundConnectionState.status(context)
     }
 
+    Function("postAgentNotification") { tag: String, title: String, body: String, deepLink: String ->
+      T3BackgroundConnectionService.postAgentNotification(
+        applicationContext(),
+        tag,
+        title,
+        body,
+        deepLink,
+      )
+    }
+
+    Function("dismissAgentNotification") { tag: String ->
+      T3BackgroundConnectionService.dismissAgentNotification(applicationContext(), tag)
+    }
+
     AsyncFunction("setEnabled") { enabled: Boolean ->
       val context = applicationContext()
       T3BackgroundConnectionState.setEnabled(context, enabled)

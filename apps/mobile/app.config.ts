@@ -9,6 +9,7 @@ const repoEnv = loadRepoEnv();
 Object.assign(process.env, repoEnv);
 
 const APP_VARIANT = resolveAppVariant(repoEnv.APP_VARIANT);
+const isTestProvisioningBuild = repoEnv.EXPO_PUBLIC_T3_TEST_PROVISIONING === "1";
 const isIosPersonalTeamBuild = repoEnv.T3CODE_IOS_PERSONAL_TEAM === "1";
 
 const personalTeamBundleIdentifier = repoEnv.T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID?.trim();
@@ -99,8 +100,14 @@ function resolveAppVariant(value: string | undefined): AppVariant {
 
 const variant = VARIANT_CONFIG[APP_VARIANT];
 const appName = process.env.T3_ANDROID_APP_NAME?.trim() || variant.appName;
-const androidPackage =
-  process.env.T3_ANDROID_PACKAGE_OVERRIDE?.trim() || variant.androidPackage;
+const androidPackage = process.env.T3_ANDROID_PACKAGE_OVERRIDE?.trim() || variant.androidPackage;
+const androidVersionCodeValue = process.env.T3_ANDROID_VERSION_CODE?.trim() || "1";
+const androidVersionCode = Number.parseInt(androidVersionCodeValue, 10);
+
+if (!Number.isSafeInteger(androidVersionCode) || androidVersionCode < 1) {
+  throw new Error("T3_ANDROID_VERSION_CODE must be a positive integer when set.");
+}
+
 const iosBundleIdentifier = isIosPersonalTeamBuild
   ? personalTeamBundleIdentifier!
   : variant.iosBundleIdentifier;
@@ -223,6 +230,7 @@ const config: ExpoConfig = {
   android: {
     icon: variant.assets.appIcon,
     package: androidPackage,
+    versionCode: androidVersionCode,
     adaptiveIcon: {
       backgroundColor: variant.assets.androidAdaptiveBackgroundColor,
       foregroundImage: variant.assets.androidAdaptiveForeground,
@@ -347,6 +355,7 @@ const config: ExpoConfig = {
   extra: {
     appVariant: APP_VARIANT,
     iosPersonalTeamBuild: isIosPersonalTeamBuild,
+    EXPO_PUBLIC_T3_TEST_PROVISIONING: isTestProvisioningBuild ? "1" : undefined,
     relay: {
       url: repoEnv.T3CODE_RELAY_URL ?? null,
     },

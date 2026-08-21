@@ -2,6 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import type { BackgroundConnectionStatus } from "../../native/backgroundConnection";
 
+vi.hoisted(() => {
+  (globalThis as typeof globalThis & { __DEV__: boolean }).__DEV__ = false;
+});
+
 const native = vi.hoisted(() => ({
   status: null as BackgroundConnectionStatus | null,
   setEnabled: vi.fn(),
@@ -49,6 +53,20 @@ vi.mock("../../native/backgroundConnection", () => ({
   getBackgroundConnectionStatus: () => native.status,
   requestBackgroundConnectionBatteryOptimizationExemption: native.requestExemption,
   setBackgroundConnectionEnabled: native.setEnabled,
+}));
+vi.mock("../agent-awareness/notificationPermissions", () => ({
+  requestAgentNotificationPermission: vi.fn(async () => ({
+    type: "granted",
+    canAskAgain: true,
+  })),
+}));
+vi.mock("../../lib/runtime", () => ({
+  runtime: {
+    runPromiseExit: vi.fn(async (promise: Promise<unknown>) => ({
+      _tag: "Success",
+      value: await promise,
+    })),
+  },
 }));
 
 import { BackgroundConnectionSettingsSection } from "./BackgroundConnectionSettingsSection";

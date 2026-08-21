@@ -26,6 +26,13 @@ declare class BackgroundConnectionNativeModule extends NativeModule<BackgroundCo
     title: string | null,
     body: string | null,
   ) => BackgroundConnectionStatus;
+  readonly postAgentNotification?: (
+    tag: string,
+    title: string,
+    body: string,
+    deepLink: string,
+  ) => void;
+  readonly dismissAgentNotification?: (tag: string) => void;
   readonly ensureStarted?: () => BackgroundConnectionStatus;
   readonly requestBatteryOptimizationExemption?: () => Promise<BackgroundConnectionStatus>;
   readonly setRuntimeReady?: (ready: boolean) => BackgroundConnectionStatus;
@@ -110,6 +117,37 @@ export function setBackgroundConnectionNotificationContent(
     nativeModule?.setNotificationText?.(content.body);
   } catch {
     // Notification status is best-effort and must not interrupt the connection.
+  }
+}
+
+/**
+ * Native Android notifications use a stable tag/id pair, so a later result
+ * for the same thread replaces its earlier completion alert instead of adding
+ * another card. Returning false keeps the Expo fallback available on older
+ * development installs.
+ */
+export function postBackgroundConnectionAgentNotification(
+  tag: string,
+  title: string,
+  body: string,
+  deepLink: string,
+): boolean {
+  try {
+    const nativeModule = getNativeModule();
+    if (!nativeModule?.postAgentNotification) return false;
+    nativeModule.postAgentNotification(tag, title, body, deepLink);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Best-effort, thread-scoped completion dismissal for direct navigation. */
+export function dismissBackgroundConnectionAgentNotification(tag: string): void {
+  try {
+    getNativeModule()?.dismissAgentNotification?.(tag);
+  } catch {
+    // Navigation must remain usable if the native module is unavailable.
   }
 }
 

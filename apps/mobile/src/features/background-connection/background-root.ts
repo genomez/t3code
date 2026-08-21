@@ -23,6 +23,7 @@ import {
   type AgentTurnSnapshot,
 } from "../agent-awareness/localNotificationPolicy";
 import { scheduleAndroidAgentCompletionNotification } from "../agent-awareness/localNotifications";
+import { shouldSuppressAndroidCompletionNotification } from "../agent-awareness/completionNotificationPolicy";
 import { setBackgroundConnectionNotificationContent } from "../../native/backgroundConnection";
 import {
   BACKGROUND_NOTIFICATION_STATUS_MAX_AGE_MS,
@@ -88,6 +89,9 @@ export function createBackgroundConnectionRoot(
   // lost at the shell/detail boundary.
   const pendingSettlementKeys = new Set<string>();
   const agentNotificationTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const notificationTurnStates = new Map<string, AgentTurnSnapshot | null>();
+  const settledNotificationTurns = new Map<string, string>();
+  const settledShellTurnIds = new Map<string, string | undefined>();
   let notificationStatusRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   let latestNotificationThread: OrchestrationThread | null = null;
 
@@ -106,6 +110,45 @@ export function createBackgroundConnectionRoot(
     }
     clearTimeout(timer);
     agentNotificationTimers.delete(key);
+  };
+
+  const isRunningThread = (thread: OrchestrationThread | null): boolean =>
+    thread?.latestTurn?.state === "running" && thread.latestTurn.completedAt === null;
+
+  const isRunningTurn = (turn: AgentTurnSnapshot | null | undefined): boolean =>
+    turn?.state === "running" && turn.completedAt === null;
+
+  const mergeObservedTurn = (
+    previous: AgentTurnSnapshot | undefined,
+    next: AgentTurnSnapshot | null,
+  ): AgentTurnSnapshot | null => {
+    if (next === null) return previous ?? null;
+    if (
+      previous !== undefined &&
+      previous.turnId === next.turnId &&
+      !isRunningTurn(previous) &&
+      isRunningTurn(next)
+    ) {
+      return previous;
+    }
+    return next;
+  };
+
+  const notificationKeyForThread = (thread: OrchestrationThread | null): string | null => {
+    if (thread === null) return null;
+    const shell = threadShells.find((candidate) => candidate.id === thread.id);
+    if (shell !== undefined) {
+      return refKey({ environmentId: shell.environmentId, threadId: shell.id });
+    }
+    return retainedThread?.threadId === thread.id ? refKey(retainedThread) : null;
+  };
+
+  const isNotificationThreadRunning = (thread: OrchestrationThread | null): boolean => {
+    if (!isRunningThread(thread)) return false;
+    const key = notificationKeyForThread(thread);
+    if (key !== null && settledNotificationTurns.has(key)) return false;
+    const observedTurn = key === null ? undefined : (notificationTurnStates.get(key) ?? undefined);
+    return observedTurn === undefined || isRunningTurn(observedTurn);
   };
 
   const readThreadFromResult = (result: unknown): OrchestrationThread | null => {
@@ -153,41 +196,72 @@ export function createBackgroundConnectionRoot(
     return null;
   };
 
-  const notificationThreadTitle = (thread: OrchestrationThread | null): string => {
-    const ref =
-      thread === null
-        ? retainedThread ?? selectBackgroundConnectionThreadTargets(retainedThread, threadShells)[0]
-        : null;
-    const shell = ref
-      ? threadShells.find(
-          (candidate) =>
-            candidate.environmentId === ref.environmentId && candidate.id === ref.threadId,
-        )
-      : threadShells.find((candidate) => candidate.id === thread?.id);
-    return shell?.title ?? thread?.title ?? DEFAULT_BACKGROUND_NOTIFICATION_TITLE;
+  const deriveNotificationContent = (thread: OrchestrationThread | null) => {
+    const activeShells = threadShells.filter((shell) => {
+      const shellIsActive =
+        shell.session?.status === "starting" || shell.session?.status === "running";
+      if (!shellIsActive) return false;
+      const key = refKey({ environmentId: shell.environmentId, threadId: shell.id });
+      const observedTurn = notificationTurnStates.get(key);
+      const shellTurnId = shell.latestTurn?.turnId;
+      if (settledNotificationTurns.has(key)) return false;
+      if (
+        observedTurn !== undefined &&
+        shellTurnId !== undefined &&
+        shellTurnId !== observedTurn?.turnId
+      ) {
+        return shell.latestTurn?.state === "running" && shell.latestTurn.completedAt === null;
+      }
+      if (observedTurn !== undefined && !isRunningTurn(observedTurn)) return false;
+      if (thread === null || shell.id !== thread.id) return true;
+      return observedTurn === undefined || isRunningThread(thread);
+    });
+    const activeThreads = new Map<string, { readonly title: string }>();
+    for (const shell of activeShells) {
+      activeThreads.set(refKey({ environmentId: shell.environmentId, threadId: shell.id }), {
+        title: shell.title,
+      });
+    }
+
+    const runningThread = isNotificationThreadRunning(thread) ? thread : null;
+    if (runningThread !== null) {
+      const matchingShell = threadShells.find((shell) => shell.id === runningThread.id);
+      const key = matchingShell
+        ? refKey({ environmentId: matchingShell.environmentId, threadId: matchingShell.id })
+        : `thread:${runningThread.id}`;
+      activeThreads.set(key, { title: matchingShell?.title ?? runningThread.title });
+    }
+
+    if (activeThreads.size === 0) {
+      return deriveBackgroundNotificationContent(null, null);
+    }
+    const activeThread = [...activeThreads.values()][0]!;
+    const activityThread =
+      runningThread ??
+      ({ activities: [], latestTurn: { state: "running" } } as unknown as OrchestrationThread);
+    const activeContent = deriveBackgroundNotificationContent(activityThread, activeThread.title);
+    if (activeThreads.size === 1) return activeContent;
+    return {
+      title: DEFAULT_BACKGROUND_NOTIFICATION_TITLE,
+      body: `${activeThreads.size} threads active — ${activeContent.body}`,
+    };
   };
 
   const publishNotificationStatus = (thread: OrchestrationThread | null) => {
     latestNotificationThread = thread;
-    const content = deriveBackgroundNotificationContent(
-      thread,
-      notificationThreadTitle(thread),
-    );
+    const content = deriveNotificationContent(thread);
     setBackgroundConnectionNotificationContent({
       title: content.title,
       body: deriveConnectionNotificationText() ?? content.body,
     });
     clearNotificationStatusRefresh();
-    if (thread?.latestTurn?.state !== "running") {
+    if (!isNotificationThreadRunning(thread)) {
       return;
     }
     notificationStatusRefreshTimer = setTimeout(() => {
       notificationStatusRefreshTimer = null;
-      if (latestNotificationThread?.latestTurn?.state === "running") {
-        const content = deriveBackgroundNotificationContent(
-          latestNotificationThread,
-          notificationThreadTitle(latestNotificationThread),
-        );
+      if (isNotificationThreadRunning(latestNotificationThread)) {
+        const content = deriveNotificationContent(latestNotificationThread);
         setBackgroundConnectionNotificationContent({
           title: content.title,
           body: deriveConnectionNotificationText() ?? content.body,
@@ -215,7 +289,9 @@ export function createBackgroundConnectionRoot(
       const release = registry.subscribe(
         environmentCatalog.stateAtom(environmentId),
         (result) => {
-          const state = Option.getOrNull(AsyncResult.value(result)) as SupervisorConnectionState | null;
+          const state = Option.getOrNull(
+            AsyncResult.value(result),
+          ) as SupervisorConnectionState | null;
           if (state === null) {
             connectionStates.delete(environmentId);
           } else {
@@ -234,50 +310,59 @@ export function createBackgroundConnectionRoot(
     atom: Parameters<AtomRegistry.AtomRegistry["get"]>[0],
     fallbackThread: OrchestrationThread,
   ) => {
-    const key = refKey(ref);
-    clearAgentNotificationTimer(key);
-    const readNotificationThread = (): OrchestrationThread => {
-      agentNotificationTimers.delete(key);
-      const latestThread = readThreadFromResult(registry.get(atom));
-      const thread = latestThread ?? fallbackThread;
-      const shell = threadShells.find(
-        (candidate) =>
-          candidate.environmentId === ref.environmentId && candidate.id === ref.threadId,
-      );
-      const title =
-        shell?.title !== undefined && shell.title !== fallbackThread.title
-          ? shell.title
-          : thread.title;
-      return title === thread.title ? thread : { ...thread, title };
-    };
+    void shouldSuppressAndroidCompletionNotification(ref)
+      .then((suppress) => {
+        if (suppress) {
+          return;
+        }
+        const key = refKey(ref);
+        clearAgentNotificationTimer(key);
+        const readNotificationThread = (): OrchestrationThread => {
+          agentNotificationTimers.delete(key);
+          const latestThread = readThreadFromResult(registry.get(atom));
+          const thread = latestThread ?? fallbackThread;
+          const shell = threadShells.find(
+            (candidate) =>
+              candidate.environmentId === ref.environmentId && candidate.id === ref.threadId,
+          );
+          const title =
+            shell?.title !== undefined && shell.title !== fallbackThread.title
+              ? shell.title
+              : thread.title;
+          return title === thread.title ? thread : { ...thread, title };
+        };
 
-    const notificationThread = readNotificationThread();
-    const initialTitle = notificationThread.title;
-    void scheduleAndroidAgentCompletionNotification({
-      environmentId: ref.environmentId,
-      thread: notificationThread,
-    }).catch((error) => {
-      console.error("[background-connection] failed to schedule agent notification", error);
-    });
+        const notificationThread = readNotificationThread();
+        const initialTitle = notificationThread.title;
+        void scheduleAndroidAgentCompletionNotification({
+          environmentId: ref.environmentId,
+          thread: notificationThread,
+        }).catch((error) => {
+          console.error("[background-connection] failed to schedule agent notification", error);
+        });
 
-    // Thread-title generation can settle just after the agent turn. Refresh
-    // the same Android notification slot once without making the user wait
-    // for the initial completion alert.
-    const timer = setTimeout(() => {
-      agentNotificationTimers.delete(key);
-      const updatedThread = readNotificationThread();
-      if (updatedThread.title === initialTitle) {
-        return;
-      }
-      void scheduleAndroidAgentCompletionNotification({
-        environmentId: ref.environmentId,
-        silent: true,
-        thread: updatedThread,
-      }).catch((error) => {
-        console.error("[background-connection] failed to refresh agent notification", error);
+        // Thread-title generation can settle just after the agent turn. Refresh
+        // the same Android notification slot once without making the user wait
+        // for the initial completion alert.
+        const timer = setTimeout(() => {
+          agentNotificationTimers.delete(key);
+          const updatedThread = readNotificationThread();
+          if (updatedThread.title === initialTitle) {
+            return;
+          }
+          void scheduleAndroidAgentCompletionNotification({
+            environmentId: ref.environmentId,
+            silent: true,
+            thread: updatedThread,
+          }).catch((error) => {
+            console.error("[background-connection] failed to refresh agent notification", error);
+          });
+        }, AGENT_NOTIFICATION_SETTLEMENT_GRACE_MS);
+        agentNotificationTimers.set(key, timer);
+      })
+      .catch((error) => {
+        console.error("[background-connection] failed to evaluate notification policy", error);
       });
-    }, AGENT_NOTIFICATION_SETTLEMENT_GRACE_MS);
-    agentNotificationTimers.set(key, timer);
   };
 
   const clearRetainedIfCurrent = (ref: ScopedThreadRef) => {
@@ -342,15 +427,14 @@ export function createBackgroundConnectionRoot(
           if (state?.status === "deleted") {
             clearAgentNotificationTimer(key);
             pendingSettlementKeys.delete(key);
+            notificationTurnStates.delete(key);
+            settledNotificationTurns.delete(key);
+            settledShellTurnIds.delete(key);
             clearRetainedIfCurrent(ref);
             publishNotificationStatus(null);
             return;
           }
           const thread = readThreadFromResult(result);
-          publishNotificationStatus(thread);
-          if (thread?.latestTurn?.state === "running") {
-            pendingSettlementKeys.add(key);
-          }
           const nextTurn = thread?.latestTurn
             ? {
                 completedAt: thread.latestTurn.completedAt,
@@ -358,10 +442,40 @@ export function createBackgroundConnectionRoot(
                 turnId: thread.latestTurn.turnId,
               }
             : null;
+          if (thread !== null) {
+            notificationTurnStates.set(
+              key,
+              mergeObservedTurn(notificationTurnStates.get(key) ?? undefined, nextTurn),
+            );
+            if (nextTurn !== null && isRunningTurn(nextTurn)) {
+              const settledDetailTurnId = settledNotificationTurns.get(key);
+              const settledShellTurnId = settledShellTurnIds.get(key);
+              if (
+                settledDetailTurnId === undefined ||
+                (nextTurn.turnId !== settledDetailTurnId && nextTurn.turnId !== settledShellTurnId)
+              ) {
+                settledNotificationTurns.delete(key);
+                settledShellTurnIds.delete(key);
+                notificationTurnStates.delete(key);
+              }
+            }
+          }
+          if (isRunningThread(thread)) pendingSettlementKeys.add(key);
           if (hasObservedDetail && isAgentTurnSettlement(previousTurn, nextTurn) && thread) {
             pendingSettlementKeys.delete(key);
+            if (nextTurn !== null) {
+              settledNotificationTurns.set(key, nextTurn.turnId);
+              settledShellTurnIds.set(
+                key,
+                threadShells.find(
+                  (candidate) =>
+                    candidate.environmentId === ref.environmentId && candidate.id === ref.threadId,
+                )?.latestTurn?.turnId,
+              );
+            }
             scheduleAgentCompletionNotification(ref, atom, thread);
           }
+          publishNotificationStatus(thread);
           previousTurn = nextTurn;
           hasObservedDetail = true;
           if (!pendingSettlementKeys.has(key)) {
@@ -479,6 +593,9 @@ export function createBackgroundConnectionRoot(
       for (const key of agentNotificationTimers.keys()) {
         clearAgentNotificationTimer(key);
       }
+      notificationTurnStates.clear();
+      settledNotificationTurns.clear();
+      settledShellTurnIds.clear();
       clearNotificationStatusRefresh();
       latestNotificationThread = null;
     },

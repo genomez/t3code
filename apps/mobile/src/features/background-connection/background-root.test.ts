@@ -9,6 +9,10 @@ import * as Option from "effect/Option";
 import { AsyncResult, type AtomRegistry } from "effect/unstable/reactivity";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+vi.mock("react-native", () => ({
+  AppState: { currentState: "background" },
+}));
+
 function deferred() {
   let resolve!: () => void;
   const promise = new Promise<void>((resolvePromise) => {
@@ -140,6 +144,10 @@ vi.mock("../agent-awareness/localNotifications", () => ({
   scheduleAndroidAgentCompletionNotification: agentNotification.schedule,
 }));
 
+vi.mock("../agent-awareness/completionNotificationPolicy", () => ({
+  shouldSuppressAndroidCompletionNotification: vi.fn(async () => false),
+}));
+
 import { acquireBackgroundConnectionRoot, createBackgroundConnectionRoot } from "./background-root";
 
 interface CatalogState {
@@ -172,7 +180,9 @@ function createRegistry(options: {
     if (atom === atoms.catalog) return catalog;
     if (atom === atoms.threadShells) return threadShells;
     if (atom === atoms.networkStatusValue) return "online";
-    const connectionState = [...atoms.connectionStates.values()].find((candidate) => candidate === atom);
+    const connectionState = [...atoms.connectionStates.values()].find(
+      (candidate) => candidate === atom,
+    );
     if (connectionState !== undefined) return AsyncResult.success(connectionState.state);
     const detailKey = (atom as { readonly detailKey?: string }).detailKey;
     if (detailKey !== undefined) {
@@ -344,9 +354,7 @@ describe("background connection root", () => {
     const harness = createRegistry({
       catalog: {
         isReady: true,
-        entries: new Map([
-          [environmentId, { target: { label: "Lenovo" } }],
-        ]),
+        entries: new Map([[environmentId, { target: { label: "Lenovo" } }]]),
       },
     });
     const root = createBackgroundConnectionRoot(harness.registry);

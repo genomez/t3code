@@ -5,6 +5,10 @@ import { Platform } from "react-native";
 import { buildAgentAwarenessDeepLink } from "@t3tools/shared/agentAwareness";
 import { androidAgentNotificationIdentifier } from "./localNotificationIdentifier";
 import { buildAndroidAgentNotificationText } from "./localNotificationContent";
+import {
+  dismissBackgroundConnectionAgentNotification,
+  postBackgroundConnectionAgentNotification,
+} from "../../native/backgroundConnection";
 
 export const ANDROID_AGENT_NOTIFICATION_CHANNEL_ID = "t3-agent-updates";
 
@@ -65,15 +69,32 @@ export async function scheduleAndroidAgentCompletionNotification(input: {
 
   await ensureAndroidAgentNotificationChannel();
   const notificationText = buildAndroidAgentNotificationText(input.thread);
+  const identifier = androidAgentNotificationIdentifier(input.environmentId, input.thread.id);
+  const deepLink = buildAgentAwarenessDeepLink({
+    environmentId: input.environmentId,
+    threadId: input.thread.id,
+  });
+
+  // Expo's scheduler can retain separate native records even with a stable
+  // JS identifier. The native tag/id route guarantees replacement per thread
+  // and keeps completion alerts in a group distinct from the ongoing service.
+  if (
+    postBackgroundConnectionAgentNotification(
+      identifier,
+      notificationText.title,
+      notificationText.body,
+      deepLink,
+    )
+  ) {
+    return;
+  }
+
   await Notifications.scheduleNotificationAsync({
     content: {
       body: notificationText.body,
       color: "#7565C7",
       data: {
-        deepLink: buildAgentAwarenessDeepLink({
-          environmentId: input.environmentId,
-          threadId: input.thread.id,
-        }),
+        deepLink,
         environmentId: input.environmentId,
         threadId: input.thread.id,
       },
@@ -83,7 +104,29 @@ export async function scheduleAndroidAgentCompletionNotification(input: {
       sound: input.silent ? false : "default",
       title: notificationText.title,
     },
-    identifier: androidAgentNotificationIdentifier(input.environmentId, input.thread.id),
+    identifier,
     trigger: null,
   });
+}
+
+/** Dismiss only this thread's completion alert when it is opened directly. */
+export async function dismissAndroidAgentCompletionNotification(input: {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: OrchestrationThread["id"];
+}): Promise<void> {
+  if (Platform.OS !== "android") {
+    return;
+  }
+
+  const identifier = androidAgentNotificationIdentifier(input.environmentId, input.threadId);
+  dismissBackgroundConnectionAgentNotification(identifier);
+
+  const presentedNotifications = await Notifications.getPresentedNotificationsAsync();
+  const matchingNotification = presentedNotifications.find((candidate) => {
+    const data = candidate.request.content.data;
+    return data?.environmentId === input.environmentId && data?.threadId === input.threadId;
+  });
+  await Notifications.dismissNotificationAsync(
+    matchingNotification?.request.identifier ?? identifier,
+  );
 }

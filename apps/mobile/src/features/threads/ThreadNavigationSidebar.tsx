@@ -103,6 +103,7 @@ interface ThreadNavigationSidebarProps {
   readonly onOpenSettings: () => void;
   readonly onOpenEnvironmentSettings: () => void;
   readonly onNewThreadInProject: (project: EnvironmentProject) => void;
+  readonly onStartNewTask: () => void;
   readonly onSearchQueryChange: (query: string) => void;
   readonly onSelectThread: (thread: EnvironmentThreadShell) => void;
   readonly onRequestVisibility: () => void;
@@ -1305,7 +1306,10 @@ function ThreadNavigationSidebarPane(
             <ControlPillMenu actions={listMenuActions} onPressAction={handleListMenuAction}>
               <SidebarFilterButton accessibilityLabel="Filter and sort threads" icon={filterIcon} />
             </ControlPillMenu>
-            <SidebarHeaderActions onOpenSettings={props.onOpenSettings} />
+            <SidebarHeaderActions
+              onOpenSettings={props.onOpenSettings}
+              onStartNewTask={props.onStartNewTask}
+            />
           </View>
         </View>
 

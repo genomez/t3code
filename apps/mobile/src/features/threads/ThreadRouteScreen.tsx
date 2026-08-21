@@ -30,6 +30,8 @@ import { LoadingScreen } from "../../components/LoadingScreen";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { connectionTone } from "../connection/connectionTone";
+import { dismissAndroidAgentCompletionNotification } from "../agent-awareness/localNotifications";
+import { setAndroidForegroundThread } from "../agent-awareness/foregroundThread";
 
 import {
   useRemoteConnections,
@@ -211,6 +213,19 @@ function ThreadRouteContent(
   const { onReconnectEnvironment } = useRemoteConnections();
   const { selectedThread, selectedThreadProject, selectedEnvironmentConnection } =
     useThreadSelection();
+  // On wide Android layouts the route can remain focused while selecting a
+  // different sidebar thread. Keep notification visibility tied to the
+  // thread actually rendered in the workspace, rather than stale route params.
+  const displayedThreadRef = useMemo(
+    () =>
+      selectedThread === null
+        ? null
+        : {
+            environmentId: selectedThread.environmentId,
+            threadId: selectedThread.id,
+          },
+    [selectedThread],
+  );
   const selectedThreadDetailState = props.selectedThreadDetailState;
   const selectedThreadDetail = Option.getOrNull(selectedThreadDetailState.data);
   // "Load earlier turns" header state for windowed (paginated) thread loads.
@@ -297,6 +312,29 @@ function ThreadRouteContent(
         }
       };
     }, [props.renderInspector]),
+  );
+  useFocusEffect(
+    useCallback(() => {
+      if (displayedThreadRef === null) {
+        return undefined;
+      }
+
+      void dismissAndroidAgentCompletionNotification({
+        environmentId: displayedThreadRef.environmentId,
+        threadId: displayedThreadRef.threadId,
+      }).catch((error) => {
+        console.error("[agent-awareness] failed to dismiss thread notification", error);
+      });
+      return undefined;
+    }, [displayedThreadRef]),
+  );
+  useFocusEffect(
+    useCallback(() => {
+      if (displayedThreadRef === null) {
+        return undefined;
+      }
+      return setAndroidForegroundThread(displayedThreadRef);
+    }, [displayedThreadRef]),
   );
   const routeEnvironmentRuntime = useRemoteEnvironmentRuntime(environmentId);
   const routeConnectionState =
