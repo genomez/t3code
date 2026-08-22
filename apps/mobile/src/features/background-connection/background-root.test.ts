@@ -446,7 +446,7 @@ describe("background connection root", () => {
       ...runningThread,
       latestTurn: {
         ...runningThread.latestTurn!,
-        completedAt: "2026-08-14T12:00:00.000Z",
+        completedAt: new Date().toISOString(),
         state: "completed",
       },
     } as unknown as OrchestrationThread;
@@ -474,6 +474,61 @@ describe("background connection root", () => {
     await vi.dynamicImportSettled();
 
     expect(agentNotification.schedule).toHaveBeenCalledOnce();
+    expect(harness.subscribeReleaseCount(`detail:${detailKey}`)).toBe(1);
+    root.stop();
+  });
+
+  it("settles a stale reconnect completion without posting an old notification", async () => {
+    const activeThreadId = ThreadId.make("stale-completion-thread");
+    const activeShell = {
+      environmentId,
+      id: activeThreadId,
+      projectId: "project-1",
+      title: "Older background task",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      session: { status: "running" },
+    } as unknown as EnvironmentThreadShell;
+    const detailKey = `${environmentId}:${activeThreadId}`;
+    const runningThread = {
+      id: activeThreadId,
+      title: "Older background task",
+      activities: [],
+      latestTurn: {
+        completedAt: null,
+        state: "running",
+        turnId: "turn-stale",
+      },
+    } as unknown as OrchestrationThread;
+    const completedThread = {
+      ...runningThread,
+      latestTurn: {
+        ...runningThread.latestTurn!,
+        completedAt: "2026-01-01T00:00:00.000Z",
+        state: "completed",
+      },
+    } as unknown as OrchestrationThread;
+    const harness = createRegistry({
+      catalog: { isReady: true, entries: new Map([[environmentId, {}]]) },
+      threadShells: [activeShell],
+    });
+    const root = createBackgroundConnectionRoot(harness.registry);
+
+    root.start();
+    harness.emitDetail(detailKey, {
+      status: "live",
+      data: Option.some(runningThread),
+    });
+    harness.setThreadShells([
+      { ...activeShell, session: { status: "ready" } } as unknown as EnvironmentThreadShell,
+    ]);
+    harness.emitDetail(detailKey, {
+      status: "live",
+      data: Option.some(completedThread),
+    });
+    await vi.dynamicImportSettled();
+
+    expect(agentNotification.schedule).not.toHaveBeenCalled();
     expect(harness.subscribeReleaseCount(`detail:${detailKey}`)).toBe(1);
     root.stop();
   });

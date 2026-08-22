@@ -20,6 +20,7 @@ import {
 import { selectBackgroundConnectionThreadTargets } from "./target-selection";
 import {
   isAgentTurnSettlement,
+  shouldNotifyAgentTurnSettlement,
   type AgentTurnSnapshot,
 } from "../agent-awareness/localNotificationPolicy";
 import { scheduleAndroidAgentCompletionNotification } from "../agent-awareness/localNotifications";
@@ -473,7 +474,9 @@ export function createBackgroundConnectionRoot(
                 )?.latestTurn?.turnId,
               );
             }
-            scheduleAgentCompletionNotification(ref, atom, thread);
+            if (shouldNotifyAgentTurnSettlement(previousTurn, nextTurn)) {
+              scheduleAgentCompletionNotification(ref, atom, thread);
+            }
           }
           publishNotificationStatus(thread);
           previousTurn = nextTurn;
