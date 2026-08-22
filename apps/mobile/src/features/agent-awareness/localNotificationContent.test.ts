@@ -4,6 +4,7 @@ import {
   ANDROID_AGENT_RESPONSE_PREVIEW_MAX_LENGTH,
   buildAndroidAgentNotificationText,
   deriveLatestAssistantResponsePreview,
+  stripMarkdownLinkDestinations,
 } from "./localNotificationContent";
 
 const runningTurn = {
@@ -72,6 +73,36 @@ describe("local agent notification content", () => {
     expect(preview).not.toBeNull();
     expect(preview!.length).toBe(ANDROID_AGENT_RESPONSE_PREVIEW_MAX_LENGTH);
     expect(preview!.endsWith("…")).toBe(true);
+  });
+
+  it("keeps Markdown link labels without exposing raw local destinations", () => {
+    const response = String.raw`See [T3_ANDROID_REQUIRED_FEATURES.md](<C:\Users\jason\OneDrive\Documents\Cursor\Codex\T3_ANDROID_REQUIRED_FEATURES.md:107>) for the requirement.`;
+
+    expect(stripMarkdownLinkDestinations(response)).toBe(
+      "See T3_ANDROID_REQUIRED_FEATURES.md for the requirement.",
+    );
+    expect(
+      deriveLatestAssistantResponsePreview(
+        thread({
+          messages: [
+            {
+              id: "assistant-2" as never,
+              role: "assistant" as const,
+              text: response,
+              turnId: "turn-2" as never,
+            },
+          ],
+        }),
+      ),
+    ).toBe("See T3_ANDROID_REQUIRED_FEATURES.md for the requirement.");
+  });
+
+  it("removes web and image destinations from the compact preview", () => {
+    expect(
+      stripMarkdownLinkDestinations(
+        "Read [the docs](https://example.com/docs) and ![the diagram](https://example.com/a.png).",
+      ),
+    ).toBe("Read the docs and the diagram.");
   });
 
   it("uses the updated thread title and includes the response status", () => {

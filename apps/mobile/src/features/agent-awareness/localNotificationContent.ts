@@ -10,8 +10,15 @@ type AgentNotificationThread = Pick<OrchestrationThread, "title" | "latestTurn">
   readonly messages: ReadonlyArray<AgentNotificationMessage>;
 };
 
+export function stripMarkdownLinkDestinations(text: string): string {
+  return text.replace(
+    /!?\[([^\]\r\n]+)\]\(\s*(?:<[^>\r\n]*>|[^)\r\n]*)\s*\)/g,
+    (_link, label: string) => label,
+  );
+}
+
 function normalizePreview(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
+  return stripMarkdownLinkDestinations(text).replace(/\s+/g, " ").trim();
 }
 
 function truncatePreview(text: string): string {
