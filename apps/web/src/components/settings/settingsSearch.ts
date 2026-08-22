@@ -163,6 +163,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     desktopOnly: true,
   },
   {
+    id: "desktop-notifications",
+    title: "Desktop notifications",
+    to: "/settings/general",
+    desktopOnly: true,
+  },
+  {
     id: "text-generation-model",
     title: "Text generation model",
     to: "/settings/general",

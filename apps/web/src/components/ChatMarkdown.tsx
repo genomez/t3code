@@ -73,11 +73,13 @@ import {
   serializeTableElementToMarkdown,
 } from "../markdown-clipboard";
 import { remarkNormalizeListItemIndentation } from "../markdown-list-indentation";
+import { remarkFilesystemLinkDestinations } from "../markdown-filesystem-links";
 import {
   normalizeMarkdownLinkDestination,
   resolveInlineCodeFileLinkMeta,
   resolveMarkdownFileLinkMeta,
   rewriteMarkdownFileUriHref,
+  toFilesystemLinkUrl,
   type MarkdownFileLinkMeta,
 } from "../markdown-links";
 import { readLocalApi } from "../localApi";
@@ -175,7 +177,7 @@ export function orderedListGutterStyle(
   return { "--list-gutter": `${digits + 1}ch` };
 }
 
-const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
+export const CHAT_MARKDOWN_SANITIZE_SCHEMA: NonNullable<Parameters<typeof rehypeSanitize>[0]> = {
   ...defaultSchema,
   attributes: {
     ...defaultSchema.attributes,
@@ -187,12 +189,13 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
     ...defaultSchema.protocols,
     href: [...(defaultSchema.protocols?.href ?? []), "file"],
   },
-} satisfies Parameters<typeof rehypeSanitize>[0];
+};
 
 const CHAT_MARKDOWN_REMARK_PLUGINS = [
   remarkGfm,
   remarkGithubAlerts,
   remarkNormalizeListItemIndentation,
+  remarkFilesystemLinkDestinations,
   remarkPreserveCodeMeta,
   remarkTagInlineCode,
 ] satisfies NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
@@ -202,6 +205,7 @@ const CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS = [
   remarkGithubAlerts,
   remarkNormalizeListItemIndentation,
   remarkBreaks,
+  remarkFilesystemLinkDestinations,
   remarkPreserveCodeMeta,
   remarkTagInlineCode,
 ] satisfies NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
@@ -915,7 +919,7 @@ function extractMarkdownLinkHrefs(text: string): string[] {
 }
 
 function normalizeMarkdownLinkHrefKey(href: string): string {
-  const normalizedHref = normalizeMarkdownLinkDestination(href);
+  const normalizedHref = toFilesystemLinkUrl(href) ?? normalizeMarkdownLinkDestination(href);
   return rewriteMarkdownFileUriHref(normalizedHref) ?? normalizedHref;
 }
 

@@ -5,6 +5,7 @@ import {
   resolveMarkdownFileLinkMeta,
   resolveMarkdownFileLinkTarget,
   rewriteMarkdownFileUriHref,
+  toFilesystemLinkUrl,
 } from "./markdown-links";
 
 describe("rewriteMarkdownFileUriHref", () => {
@@ -32,6 +33,30 @@ describe("rewriteMarkdownFileUriHref", () => {
     expect(
       rewriteMarkdownFileUriHref(" <file:///D:/Programme/t3code/apps/web/src/markdown-links.ts> "),
     ).toBe("D:/Programme/t3code/apps/web/src/markdown-links.ts");
+  });
+});
+
+describe("toFilesystemLinkUrl", () => {
+  it("maps and normalizes Windows drive destinations", () => {
+    expect(toFilesystemLinkUrl("D:/tmp/example.md")).toBe("file:///D:/tmp/example.md");
+    expect(toFilesystemLinkUrl("M:\\batches\\docs\\prompt.md")).toBe(
+      "file:///M:/batches/docs/prompt.md",
+    );
+  });
+
+  it("round-trips through the renderer path rewrite", () => {
+    const fileUrl = toFilesystemLinkUrl("D:/tmp/example.md");
+    expect(fileUrl).not.toBeNull();
+    expect(rewriteMarkdownFileUriHref(fileUrl!)).toBe("D:/tmp/example.md");
+  });
+
+  it("unwraps angle-bracketed paths and rejects unsafe or unrelated schemes", () => {
+    expect(toFilesystemLinkUrl(" <D:/Program Files/example.md> ")).toBe(
+      "file:///D:/Program Files/example.md",
+    );
+    expect(toFilesystemLinkUrl("javascript:alert(1)")).toBeNull();
+    expect(toFilesystemLinkUrl("https://example.com")).toBeNull();
+    expect(toFilesystemLinkUrl("./relative.md")).toBeNull();
   });
 });
 
