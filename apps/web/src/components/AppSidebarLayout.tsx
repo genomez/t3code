@@ -2,18 +2,22 @@ import { useAtomValue } from "@effect/atom-react";
 import * as Schema from "effect/Schema";
 import {
   useEffect,
+  useMemo,
   useState,
   useSyncExternalStore,
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { useLocation, useNavigate } from "@tanstack/react-router";
+import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 
+import { useComposerDraftStore } from "../composerDraftStore";
 import { isElectron } from "../env";
 import { getLocalStorageItem, removeLocalStorageItem } from "../hooks/useLocalStorage";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import { cn, isMacPlatform } from "../lib/utils";
+import { setBackgroundActivityFocusedThread } from "../lib/backgroundActivityReporter";
 import { primaryServerKeybindingsAtom } from "../state/server";
+import { resolveActiveThreadRouteRef, resolveThreadRouteTarget } from "../threadRoutes";
 import { useEnvironmentIdentificationMode, useLegacySidebarEnabled } from "../hooks/useSettings";
 import LegacyThreadSidebar from "./LegacySidebar";
 import ThreadSidebar from "./Sidebar";
@@ -136,6 +140,27 @@ function ProjectProjectionRetention() {
   return null;
 }
 
+function BackgroundActivityFocusedThreadBridge() {
+  const routeTarget = useParams({
+    strict: false,
+    select: (params) => resolveThreadRouteTarget(params),
+  });
+  const routeDraftThread = useComposerDraftStore((store) =>
+    routeTarget?.kind === "draft" ? store.getDraftSession(routeTarget.draftId) : null,
+  );
+  const focusedThread = useMemo(
+    () => resolveActiveThreadRouteRef(routeTarget, routeDraftThread),
+    [routeDraftThread, routeTarget],
+  );
+
+  useEffect(() => {
+    setBackgroundActivityFocusedThread(focusedThread);
+    return () => setBackgroundActivityFocusedThread(null);
+  }, [focusedThread]);
+
+  return null;
+}
+
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const legacySidebarEnabled = useLegacySidebarEnabled();
@@ -211,6 +236,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   return (
     <SidebarProvider className="h-dvh! min-h-0!" defaultOpen style={sidebarProviderStyle}>
       <ProjectProjectionRetention />
+      <BackgroundActivityFocusedThreadBridge />
       <Sidebar
         side="left"
         collapsible="offcanvas"

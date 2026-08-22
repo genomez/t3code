@@ -1,12 +1,19 @@
-import { EnvironmentId, WS_METHODS } from "@t3tools/contracts";
-import { describe, expect, it } from "@effect/vitest";
+import { EnvironmentId, ThreadId, WS_METHODS } from "@t3tools/contracts";
+import { afterEach, describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 
+import { resolveActiveThreadRouteRef, resolveThreadRouteTarget } from "../threadRoutes.ts";
 import {
+  backgroundActivityScopes,
   observeBackgroundActivitySubscription,
   retainedBackgroundScopes,
+  setBackgroundActivityFocusedThread,
   wasRecentlyInteracted,
 } from "./backgroundActivityReporter.ts";
+
+afterEach(() => {
+  setBackgroundActivityFocusedThread(null);
+});
 
 describe("wasRecentlyInteracted", () => {
   it("expires interaction independently of window focus", () => {
@@ -16,6 +23,46 @@ describe("wasRecentlyInteracted", () => {
 
   it("rejects future timestamps", () => {
     expect(wasRecentlyInteracted(10_001, 10_000)).toBe(false);
+  });
+
+  it("reports the canonical Windows route as an environment-scoped thread lease", () => {
+    const environmentId = EnvironmentId.make("environment-focused-route");
+    const routeTarget = resolveThreadRouteTarget({
+      environmentId,
+      threadId: ThreadId.make("thread-focused-route"),
+    });
+    const focusedThread = resolveActiveThreadRouteRef(routeTarget, null);
+
+    setBackgroundActivityFocusedThread(focusedThread);
+
+    expect(backgroundActivityScopes(environmentId)).toContainEqual({
+      type: "thread",
+      threadId: ThreadId.make("thread-focused-route"),
+    });
+  });
+
+  it("reports a promoted draft route as its canonical Windows thread lease", () => {
+    const environmentId = EnvironmentId.make("environment-promoted-draft");
+    const routeTarget = resolveThreadRouteTarget({ draftId: "draft-route" });
+    const focusedThread = resolveActiveThreadRouteRef(routeTarget, {
+      environmentId,
+      threadId: ThreadId.make("reserved-draft-thread"),
+      promotedTo: {
+        environmentId,
+        threadId: ThreadId.make("promoted-server-thread"),
+      },
+    });
+
+    setBackgroundActivityFocusedThread(focusedThread);
+
+    expect(backgroundActivityScopes(environmentId)).toContainEqual({
+      type: "thread",
+      threadId: ThreadId.make("promoted-server-thread"),
+    });
+    expect(backgroundActivityScopes(EnvironmentId.make("another-environment"))).not.toContainEqual({
+      type: "thread",
+      threadId: ThreadId.make("promoted-server-thread"),
+    });
   });
 
   it.effect("retains an observed subscription until its returned finalizer runs", () =>
