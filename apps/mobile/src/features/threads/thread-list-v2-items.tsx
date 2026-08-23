@@ -58,6 +58,7 @@ const STATUS_LABEL_BY_STATUS: Partial<
   input: { label: "Input", className: "text-indigo-600 dark:text-indigo-300" },
   working: { label: "Working", className: "text-sky-600 dark:text-sky-400" },
   failed: { label: "Failed", className: "text-red-700 dark:text-red-300" },
+  done: { label: "Done", className: "text-emerald-700 dark:text-emerald-300" },
 };
 
 function threadTimeLabel(thread: EnvironmentThreadShell): string {
@@ -338,6 +339,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   /** Highlights the thread open in the detail pane (iPad split view). The
       compact Home list never sets it — phones navigate away on select. */
   readonly selected?: boolean;
+  /** A completed response that has not yet been viewed on this device. */
+  readonly hasUnseenCompletion?: boolean;
   /** Override for narrow panes (iPad sidebar); defaults to window width. */
   readonly fullSwipeWidth?: number;
   readonly onSelectThread: (thread: EnvironmentThreadShell) => void;
@@ -421,7 +424,9 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const sidebarPane = props.pane === "sidebar";
   const selected = props.selected === true;
 
-  const status = resolveThreadListV2Status(thread);
+  const status = resolveThreadListV2Status(thread, {
+    hasUnseenCompletion: props.hasUnseenCompletion,
+  });
   const statusLabel = STATUS_LABEL_BY_STATUS[status];
   const timeLabel = threadTimeLabel(thread);
 

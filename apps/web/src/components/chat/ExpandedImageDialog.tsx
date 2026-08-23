@@ -1,5 +1,12 @@
 import { memo, useCallback, useEffect, useState } from "react";
-import { ChevronLeftIcon, ChevronRightIcon, XIcon } from "lucide-react";
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  RotateCcwIcon,
+  XIcon,
+  ZoomInIcon,
+  ZoomOutIcon,
+} from "lucide-react";
 import { Button } from "../ui/button";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 
@@ -13,6 +20,7 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
   onClose,
 }: ExpandedImageDialogProps) {
   const [imageOffset, setImageOffset] = useState(0);
+  const [zoom, setZoom] = useState(1);
   const index = (preview.index + imageOffset + preview.images.length) % preview.images.length;
 
   const navigateImage = useCallback((direction: -1 | 1) => {
@@ -44,7 +52,12 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
   }, [navigateImage, onClose, preview.images.length]);
 
   const item = preview.images[index];
+  const itemSrc = item?.src;
+  useEffect(() => setZoom(1), [itemSrc]);
   if (!item) return null;
+
+  const zoomIn = () => setZoom((current) => Math.min(4, current + 0.5));
+  const zoomOut = () => setZoom((current) => Math.max(1, current - 0.5));
 
   return (
     <div
@@ -82,12 +95,55 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
         >
           <XIcon />
         </Button>
-        <img
-          src={item.src}
-          alt={item.name}
-          className="max-h-[86vh] max-w-[92vw] select-none rounded-lg border border-border/70 bg-background object-contain shadow-2xl"
-          draggable={false}
-        />
+        <div className="absolute top-2 left-2 z-20 flex items-center gap-1 rounded-lg bg-black/65 p-1 text-white shadow-sm">
+          <Button
+            type="button"
+            size="icon-xs"
+            variant="ghost"
+            disabled={zoom <= 1}
+            onClick={zoomOut}
+            aria-label="Zoom out"
+          >
+            <ZoomOutIcon />
+          </Button>
+          <span className="min-w-10 text-center text-[11px] tabular-nums">
+            {Math.round(zoom * 100)}%
+          </span>
+          <Button
+            type="button"
+            size="icon-xs"
+            variant="ghost"
+            disabled={zoom >= 4}
+            onClick={zoomIn}
+            aria-label="Zoom in"
+          >
+            <ZoomInIcon />
+          </Button>
+          <Button
+            type="button"
+            size="icon-xs"
+            variant="ghost"
+            disabled={zoom === 1}
+            onClick={() => setZoom(1)}
+            aria-label="Reset zoom"
+          >
+            <RotateCcwIcon />
+          </Button>
+        </div>
+        <div className="max-h-[86vh] max-w-[92vw] overflow-auto rounded-lg border border-border/70 bg-background shadow-2xl">
+          <img
+            src={item.src}
+            alt={item.name}
+            className="block select-none object-contain"
+            draggable={false}
+            onDoubleClick={() => setZoom((current) => (current === 1 ? 2 : 1))}
+            style={{
+              width: zoom === 1 ? "auto" : `${zoom * 100}%`,
+              maxWidth: zoom === 1 ? "92vw" : "none",
+              maxHeight: zoom === 1 ? "86vh" : "none",
+            }}
+          />
+        </div>
         <p className="mt-2 max-w-[92vw] truncate text-center text-xs text-muted-foreground/80">
           {item.name}
           {preview.images.length > 1 ? ` (${index + 1}/${preview.images.length})` : ""}

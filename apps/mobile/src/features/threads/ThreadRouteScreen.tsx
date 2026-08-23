@@ -7,13 +7,15 @@ import {
 } from "@react-navigation/native";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as Option from "effect/Option";
+import { AsyncResult } from "effect/unstable/reactivity";
 import { EnvironmentId, ThreadId, type ProjectScript } from "@t3tools/contracts";
 import {
   requestOlderThreadTurns,
   threadHasOlderTurns,
 } from "@t3tools/client-runtime/state/threads";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
-import { Platform, ScrollView, View } from "react-native";
+import { AppState, Platform, ScrollView, View } from "react-native";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useWorkspaceState } from "../../state/workspace";
 import { useEnvironmentQuery } from "../../state/query";
@@ -22,6 +24,7 @@ import { vcsEnvironment } from "../../state/vcs";
 
 import { EmptyState } from "../../components/EmptyState";
 import {
+  AndroidHeaderScreen,
   AndroidScreenHeader,
   type AndroidHeaderAction,
 } from "../../components/AndroidScreenHeader";
@@ -29,6 +32,8 @@ import { LoadingScreen } from "../../components/LoadingScreen";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { connectionTone } from "../connection/connectionTone";
+import { dismissAndroidAgentCompletionNotification } from "../agent-awareness/localNotifications";
+import { setAndroidForegroundThread } from "../agent-awareness/foregroundThread";
 
 import {
   useRemoteConnections,
@@ -63,6 +68,7 @@ import { useSelectedThreadRequests } from "../../state/use-selected-thread-reque
 import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
 import { useThreadComposerState } from "../../state/use-thread-composer-state";
 import { threadEnvironment } from "../../state/threads";
+import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import { projectThreadContentPresentation } from "./threadContentPresentation";
 import {
   useAdaptiveWorkspaceLayout,
@@ -75,6 +81,7 @@ import {
   ThreadInspectorContentStack,
   type ThreadInspectorMode,
 } from "./thread-inspector-content-stack";
+import { threadCompletionVisitPatch } from "./threadCompletionAttention";
 
 interface ThreadInspectorSelection {
   readonly routeThreadIdentity: string | null;
@@ -97,7 +104,19 @@ function firstRouteParam(value: string | string[] | undefined): string | null {
 }
 
 function OpeningThreadLoadingScreen() {
-  return <LoadingScreen message="Opening thread…" messagePlacement="above-spinner" />;
+  const navigation = useNavigation();
+  return (
+    <AndroidHeaderScreen
+      title="Threads"
+      onBack={navigation.canGoBack() ? () => navigation.goBack() : undefined}
+    >
+      <LoadingScreen
+        message="Opening thread…"
+        messagePlacement="above-spinner"
+        includeTopInset={Platform.OS !== "android"}
+      />
+    </AndroidHeaderScreen>
+  );
 }
 
 type ThreadRouteScreenRouteProps = StaticScreenProps<{
@@ -111,22 +130,28 @@ interface ThreadRouteScreenProps extends ThreadRouteScreenRouteProps {
 }
 
 function ThreadUnavailableScreen() {
+  const navigation = useNavigation();
   return (
-    <ScrollView
-      contentInsetAdjustmentBehavior="automatic"
-      contentContainerStyle={{
-        flexGrow: 1,
-        justifyContent: "center",
-        paddingHorizontal: 24,
-        paddingVertical: 32,
-      }}
-      className="bg-screen flex-1"
+    <AndroidHeaderScreen
+      title="Threads"
+      onBack={navigation.canGoBack() ? () => navigation.goBack() : undefined}
     >
-      <EmptyState
-        title="Thread unavailable"
-        detail="This thread is not available in the current mobile snapshot."
-      />
-    </ScrollView>
+      <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
+        contentContainerStyle={{
+          flexGrow: 1,
+          justifyContent: "center",
+          paddingHorizontal: 24,
+          paddingVertical: 32,
+        }}
+        className="bg-screen flex-1"
+      >
+        <EmptyState
+          title="Thread unavailable"
+          detail="This thread is not available in the current mobile snapshot."
+        />
+      </ScrollView>
+    </AndroidHeaderScreen>
   );
 }
 
@@ -192,6 +217,38 @@ function ThreadRouteContent(
   const { onReconnectEnvironment } = useRemoteConnections();
   const { selectedThread, selectedThreadProject, selectedEnvironmentConnection } =
     useThreadSelection();
+  // On wide Android layouts the route can remain focused while selecting a
+  // different sidebar thread. Keep notification visibility tied to the
+  // thread actually rendered in the workspace, rather than stale route params.
+  const displayedThreadRef = useMemo(
+    () =>
+      selectedThread === null
+        ? null
+        : {
+            environmentId: selectedThread.environmentId,
+            threadId: selectedThread.id,
+          },
+    [selectedThread],
+  );
+  const preferencesResult = useAtomValue(mobilePreferencesAtom);
+  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+  const markDisplayedCompletionVisited = useCallback(() => {
+    if (
+      AppState.currentState !== "active" ||
+      selectedThread === null ||
+      !AsyncResult.isSuccess(preferencesResult)
+    ) {
+      return;
+    }
+    const patch = threadCompletionVisitPatch(
+      preferencesResult.value,
+      selectedThread,
+      new Date().toISOString(),
+    );
+    if (patch !== null) {
+      savePreferences(patch);
+    }
+  }, [preferencesResult, savePreferences, selectedThread]);
   const selectedThreadDetailState = props.selectedThreadDetailState;
   const selectedThreadDetail = Option.getOrNull(selectedThreadDetailState.data);
   // "Load earlier turns" header state for windowed (paginated) thread loads.
@@ -278,6 +335,40 @@ function ThreadRouteContent(
         }
       };
     }, [props.renderInspector]),
+  );
+  useFocusEffect(
+    useCallback(() => {
+      if (displayedThreadRef === null) {
+        return undefined;
+      }
+
+      void dismissAndroidAgentCompletionNotification({
+        environmentId: displayedThreadRef.environmentId,
+        threadId: displayedThreadRef.threadId,
+      }).catch((error) => {
+        console.error("[agent-awareness] failed to dismiss thread notification", error);
+      });
+      return undefined;
+    }, [displayedThreadRef]),
+  );
+  useFocusEffect(
+    useCallback(() => {
+      markDisplayedCompletionVisited();
+      const subscription = AppState.addEventListener("change", (state) => {
+        if (state === "active") {
+          markDisplayedCompletionVisited();
+        }
+      });
+      return () => subscription.remove();
+    }, [markDisplayedCompletionVisited]),
+  );
+  useFocusEffect(
+    useCallback(() => {
+      if (displayedThreadRef === null) {
+        return undefined;
+      }
+      return setAndroidForegroundThread(displayedThreadRef);
+    }, [displayedThreadRef]),
   );
   const routeEnvironmentRuntime = useRemoteEnvironmentRuntime(environmentId);
   const routeConnectionState =
@@ -715,6 +806,15 @@ function ThreadRouteContent(
         onPress: handleToggleInspector,
       });
     }
+    if (layout.usesSplitView) {
+      actions.push({
+        accessibilityLabel: panes.primarySidebarVisible
+          ? "Hide thread sidebar"
+          : "Show thread sidebar",
+        icon: panes.primarySidebarVisible ? "arrow.up.left.and.arrow.down.right" : "sidebar.left",
+        onPress: togglePrimarySidebar,
+      });
+    }
     return actions;
   }, [
     fileInspector.supported,
@@ -722,9 +822,12 @@ function ThreadRouteContent(
     handleOpenTerminal,
     handleOpenGitInspector,
     handleToggleInspector,
+    layout.usesSplitView,
+    panes.primarySidebarVisible,
     props.onReturnToThread,
     selectedThreadCwd,
     selectedThreadProject?.workspaceRoot,
+    togglePrimarySidebar,
   ]);
 
   // Deep links / cold starts land with Thread as the ONLY route, where the

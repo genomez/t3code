@@ -74,6 +74,7 @@ import {
   serializeTableElementToMarkdown,
 } from "../markdown-clipboard";
 import { remarkNormalizeListItemIndentation } from "../markdown-list-indentation";
+import { remarkFilesystemLinkDestinations } from "../markdown-filesystem-links";
 import {
   extractMarkdownLinkHrefs,
   normalizeMarkdownLinkDestination,
@@ -81,6 +82,7 @@ import {
   resolveMarkdownFileLinkMeta,
   rewriteMarkdownFileUriHref,
   shouldOpenMarkdownFileLinkInEditor,
+  toFilesystemLinkUrl,
   type MarkdownFileLinkMeta,
 } from "../markdown-links";
 import { readLocalApi } from "../localApi";
@@ -211,7 +213,7 @@ function rehypeNormalizeWindowsImageSrc() {
   };
 }
 
-const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
+export const CHAT_MARKDOWN_SANITIZE_SCHEMA: NonNullable<Parameters<typeof rehypeSanitize>[0]> = {
   ...defaultSchema,
   attributes: {
     ...defaultSchema.attributes,
@@ -224,12 +226,13 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
     href: [...(defaultSchema.protocols?.href ?? []), "file"],
     src: [...(defaultSchema.protocols?.src ?? []), "file"],
   },
-} satisfies Parameters<typeof rehypeSanitize>[0];
+};
 
 const CHAT_MARKDOWN_REMARK_PLUGINS = [
   remarkGfm,
   remarkGithubAlerts,
   remarkNormalizeListItemIndentation,
+  remarkFilesystemLinkDestinations,
   remarkPreserveCodeMeta,
   remarkTagInlineCode,
 ] satisfies NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
@@ -239,6 +242,7 @@ const CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS = [
   remarkGithubAlerts,
   remarkNormalizeListItemIndentation,
   remarkBreaks,
+  remarkFilesystemLinkDestinations,
   remarkPreserveCodeMeta,
   remarkTagInlineCode,
 ] satisfies NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
@@ -389,6 +393,12 @@ function nodeToPlainText(node: ReactNode): string {
     return nodeToPlainText(node.props.children);
   }
   return "";
+}
+
+export function normalizeCodeBlockClipboardText(code: string): string {
+  if (code.endsWith("\r\n")) return code.slice(0, -2);
+  if (code.endsWith("\n")) return code.slice(0, -1);
+  return code;
 }
 
 function extractCodeBlock(
@@ -674,7 +684,7 @@ function MarkdownCodeBlock({
       return;
     }
     void navigator.clipboard
-      .writeText(code)
+      .writeText(normalizeCodeBlockClipboardText(code))
       .then(() => {
         if (copiedTimerRef.current != null) {
           clearTimeout(copiedTimerRef.current);
@@ -942,7 +952,7 @@ function extractInlineCodeSpans(text: string): string[] {
 }
 
 function normalizeMarkdownLinkHrefKey(href: string): string {
-  const normalizedHref = normalizeMarkdownLinkDestination(href);
+  const normalizedHref = toFilesystemLinkUrl(href) ?? normalizeMarkdownLinkDestination(href);
   return rewriteMarkdownFileUriHref(normalizedHref) ?? normalizedHref;
 }
 

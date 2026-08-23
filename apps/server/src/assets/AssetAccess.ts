@@ -328,7 +328,10 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
       if (sourceFaviconPath && !isWorkspaceImagePreviewPath(sourceFaviconPath)) {
         return yield* new AssetPreviewTypeValidationError({ resource: input.resource });
       }
-      sourcePath = sourceFaviconPath ?? undefined;
+      sourcePath =
+        sourceFaviconPath && !isExternalOverride
+          ? sourceFaviconPath.replaceAll(path.sep, "/")
+          : (sourceFaviconPath ?? undefined);
       const canonicalFaviconPath = sourceFaviconPath
         ? yield* (
             isExternalOverride

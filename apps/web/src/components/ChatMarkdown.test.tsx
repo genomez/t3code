@@ -1,6 +1,20 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { orderedListGutterStyle } from "./ChatMarkdown";
+import { normalizeCodeBlockClipboardText, orderedListGutterStyle } from "./ChatMarkdown";
+
+describe("normalizeCodeBlockClipboardText", () => {
+  it.each([
+    ["NOZZLECAM_EXPOSURE VALUE=300\n", "NOZZLECAM_EXPOSURE VALUE=300"],
+    ["first\nsecond\n", "first\nsecond"],
+    ["first\nsecond\n\n", "first\nsecond\n"],
+    ["first\r\nsecond\r\n", "first\r\nsecond"],
+    ["trailing spaces  \n", "trailing spaces  "],
+    ["already exact", "already exact"],
+    ["", ""],
+  ])("removes exactly one structural terminal line ending from %j", (input, expected) => {
+    expect(normalizeCodeBlockClipboardText(input)).toBe(expected);
+  });
+});
 
 describe("orderedListGutterStyle", () => {
   it("leaves the default gutter alone for single-digit lists", () => {

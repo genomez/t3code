@@ -16,6 +16,7 @@ import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { AppState, type AppStateStatus } from "react-native";
 
+import { setCompletionNotificationPolicyRegistry } from "../features/agent-awareness/completionNotificationPolicy";
 import * as MobileStorage from "../persistence/mobile-storage";
 import {
   observeMobileBackgroundActivitySubscription,
@@ -52,6 +53,11 @@ export const mobileBackgroundActivityReporterLayer = Layer.effectDiscard(
     const reportRequests = yield* Queue.sliding<void>(1);
     const requestReport = () => Queue.offerUnsafe(reportRequests, undefined);
     let appState = AppState.currentState;
+
+    yield* Effect.acquireRelease(
+      Effect.sync(() => setCompletionNotificationPolicyRegistry(registry)),
+      (release) => Effect.sync(release),
+    );
 
     const report = Effect.gen(function* () {
       const observedAtMs = yield* Clock.currentTimeMillis;

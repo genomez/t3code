@@ -31,11 +31,13 @@ export function ConnectionsNewRouteScreen({
   } = useRemoteConnections();
   const navigation = useNavigation();
   const params = route.params ?? {};
-  // Deep-link prefill exists for development automation only. A production
-  // link must not arrive with attacker-chosen host and token already filled.
-  const routePairingUrl = __DEV__ ? (params.pairingUrl?.trim() ?? "") : "";
+  // Deep-link prefill is limited to development builds and explicitly marked
+  // isolated test builds. The helper never embeds a reusable credential; each
+  // link still carries a fresh, one-time pairing credential minted locally.
+  const pairingPrefillEnabled = __DEV__ || process.env.EXPO_PUBLIC_T3_TEST_PROVISIONING === "1";
+  const routePairingUrl = pairingPrefillEnabled ? (params.pairingUrl?.trim() ?? "") : "";
   const shouldAutoConnect =
-    __DEV__ &&
+    pairingPrefillEnabled &&
     routePairingUrl.length > 0 &&
     (params.autoConnect === "1" || params.autoConnect === "true");
   const insets = useSafeAreaInsets();

@@ -8,6 +8,7 @@ import {
   type BackgroundScope,
   type ClientActivityReportInput,
   type EnvironmentId,
+  type ScopedThreadRef,
   WS_METHODS,
 } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
@@ -35,6 +36,8 @@ interface RetainedScope {
 
 const retainedScopes = new Map<string, RetainedScope>();
 const retainedScopeListeners = new Set<() => void>();
+const focusedThreadListeners = new Set<() => void>();
+let focusedThread: ScopedThreadRef | null = null;
 
 function notifyRetainedScopesChanged(): void {
   for (const listener of retainedScopeListeners) {
@@ -44,6 +47,27 @@ function notifyRetainedScopesChanged(): void {
       // A failing observer must not corrupt retained-scope lifetime.
     }
   }
+}
+
+function notifyFocusedThreadChanged(): void {
+  for (const listener of focusedThreadListeners) {
+    try {
+      listener();
+    } catch {
+      // A failing observer must not corrupt focused-thread reporting.
+    }
+  }
+}
+
+export function setBackgroundActivityFocusedThread(next: ScopedThreadRef | null): void {
+  if (
+    focusedThread?.environmentId === next?.environmentId &&
+    focusedThread?.threadId === next?.threadId
+  ) {
+    return;
+  }
+  focusedThread = next;
+  notifyFocusedThreadChanged();
 }
 
 function stableScopeKey(environmentId: EnvironmentId, scope: BackgroundScope): string {
@@ -84,17 +108,26 @@ export function wasRecentlyInteracted(lastInteractionAtMs: number, observedAtMs:
   );
 }
 
-function createActivityReport(
+export function backgroundActivityScopes(
   environmentId: EnvironmentId,
-  lastInteractionAtMs: number,
-  observedAtMs: number,
-): ClientActivityReportInput {
+): ReadonlyArray<BackgroundScope> {
   const scopes = [...BASELINE_SCOPES];
   for (const entry of retainedScopes.values()) {
     if (entry.environmentId === environmentId) {
       scopes.push(entry.scope);
     }
   }
+  if (focusedThread?.environmentId === environmentId) {
+    scopes.push({ type: "thread", threadId: focusedThread.threadId });
+  }
+  return scopes;
+}
+
+function createActivityReport(
+  environmentId: EnvironmentId,
+  lastInteractionAtMs: number,
+  observedAtMs: number,
+): ClientActivityReportInput {
   return {
     environmentId,
     clientId: getClientId(),
@@ -103,7 +136,7 @@ function createActivityReport(
     focused: document.hasFocus(),
     recentlyInteracted: wasRecentlyInteracted(lastInteractionAtMs, observedAtMs),
     appState: document.visibilityState === "visible" ? "active" : "background",
-    scopes,
+    scopes: backgroundActivityScopes(environmentId),
     ttlMs: LEASE_TTL_MS,
     observedAt: DateTime.makeUnsafe(observedAtMs),
   };
@@ -214,6 +247,7 @@ export const backgroundActivityReporterLayer = Layer.effectDiscard(
     yield* Effect.acquireRelease(
       Effect.sync(() => {
         retainedScopeListeners.add(requestReport);
+        focusedThreadListeners.add(requestReport);
         document.addEventListener("visibilitychange", requestReport);
         window.addEventListener("focus", requestReport);
         window.addEventListener("blur", requestReport);
@@ -226,6 +260,7 @@ export const backgroundActivityReporterLayer = Layer.effectDiscard(
       () =>
         Effect.sync(() => {
           retainedScopeListeners.delete(requestReport);
+          focusedThreadListeners.delete(requestReport);
           document.removeEventListener("visibilitychange", requestReport);
           window.removeEventListener("focus", requestReport);
           window.removeEventListener("blur", requestReport);
