@@ -122,10 +122,15 @@ export function extractAssistantImageInputs(
     inputs.push(input);
   };
 
-  const visitOutput = (value: unknown, depth: number, nativeCodexItem = false): void => {
+  const visitOutput = (
+    value: unknown,
+    depth: number,
+    nativeCodexItem = false,
+    inheritedName?: string,
+  ): void => {
     if (depth > MAX_TRAVERSAL_DEPTH || inputs.length >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) return;
     if (Array.isArray(value)) {
-      for (const entry of value) visitOutput(entry, depth + 1);
+      for (const entry of value) visitOutput(entry, depth + 1, nativeCodexItem, inheritedName);
       return;
     }
     if (!Predicate.isObject(value) || seenObjects.has(value)) return;
@@ -136,7 +141,17 @@ export function extractAssistantImageInputs(
       stringProperty(value, "output_hint") ??
       stringProperty(value, "outputHint") ??
       stringProperty(value, "fileName") ??
-      stringProperty(value, "name");
+      stringProperty(value, "name") ??
+      inheritedName;
+
+    // Dynamic tools use inputImage for image content intentionally returned to
+    // the conversation. This is distinct from imageView, which only records an
+    // image the agent inspected and must not publish it as a thread attachment.
+    if (type === "inputImage") {
+      const imageUrl = stringProperty(value, "imageUrl");
+      if (imageUrl) add(dataUrlInput(imageUrl, suggestedName));
+      return;
+    }
 
     if (type === "imageGeneration") {
       if (!nativeCodexItem) return;
@@ -182,7 +197,7 @@ export function extractAssistantImageInputs(
     }
 
     for (const key of ["content", "result", "output"] as const) {
-      if (key in value) visitOutput(value[key], depth + 1);
+      if (key in value) visitOutput(value[key], depth + 1, nativeCodexItem, suggestedName);
     }
   };
 
@@ -193,7 +208,16 @@ export function extractAssistantImageInputs(
     if (itemType === "imageGeneration") {
       visitOutput(item, 0, String(context?.provider) === "codex");
     } else if (itemType === "mcpToolCall") {
-      visitOutput(item["result"], 0);
+      const result = item["result"];
+      const publicationName =
+        stringProperty(item, "tool") === "publish_artifact" && Predicate.isObject(result)
+          ? Predicate.isObject(result["structuredContent"])
+            ? stringProperty(result["structuredContent"], "name")
+            : undefined
+          : undefined;
+      visitOutput(result, 0, false, publicationName);
+    } else if (itemType === "dynamicToolCall") {
+      visitOutput(item["contentItems"], 0);
     }
   }
   if (stringProperty(payload, "type") === "tool_result") {

@@ -1,6 +1,53 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { normalizeCodeBlockClipboardText, orderedListGutterStyle } from "./ChatMarkdown";
+import {
+  isMarkdownFileLinkOutsideWorkspace,
+  normalizeCodeBlockClipboardText,
+  orderedListGutterStyle,
+  resolveMarkdownFileLinkPrimaryAction,
+} from "./ChatMarkdown";
+
+describe("isMarkdownFileLinkOutsideWorkspace", () => {
+  it("blocks links that cannot be resolved inside the active workspace", () => {
+    expect(isMarkdownFileLinkOutsideWorkspace(null)).toBe(true);
+    expect(isMarkdownFileLinkOutsideWorkspace("output/contact sheet.jpg")).toBe(false);
+  });
+
+  it("never falls back to editor or browser launch for an outside-workspace path", () => {
+    expect(
+      resolveMarkdownFileLinkPrimaryAction({
+        workspaceRelativePath: null,
+        openInEditor: true,
+        hasBrowserPreview: true,
+      }),
+    ).toBe("unavailable");
+  });
+
+  it("preserves ordinary actions for workspace files", () => {
+    const workspaceRelativePath = "output/contact sheet.jpg";
+    expect(
+      resolveMarkdownFileLinkPrimaryAction({
+        workspaceRelativePath,
+        openInEditor: true,
+        hasBrowserPreview: true,
+      }),
+    ).toBe("editor");
+    expect(
+      resolveMarkdownFileLinkPrimaryAction({
+        workspaceRelativePath,
+        openInEditor: false,
+        hasBrowserPreview: true,
+      }),
+    ).toBe("browser");
+    expect(
+      resolveMarkdownFileLinkPrimaryAction({
+        workspaceRelativePath,
+        openInEditor: false,
+        hasBrowserPreview: false,
+      }),
+    ).toBe("preview");
+  });
+});
 
 describe("normalizeCodeBlockClipboardText", () => {
   it.each([

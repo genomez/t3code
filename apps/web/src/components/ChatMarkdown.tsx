@@ -873,6 +873,21 @@ interface MarkdownFileLinkProps {
   className?: string | undefined;
 }
 
+export function isMarkdownFileLinkOutsideWorkspace(workspaceRelativePath: string | null): boolean {
+  return workspaceRelativePath === null;
+}
+
+export function resolveMarkdownFileLinkPrimaryAction(input: {
+  readonly workspaceRelativePath: string | null;
+  readonly openInEditor: boolean;
+  readonly hasBrowserPreview: boolean;
+}): "unavailable" | "editor" | "browser" | "preview" {
+  if (isMarkdownFileLinkOutsideWorkspace(input.workspaceRelativePath)) return "unavailable";
+  if (input.openInEditor) return "editor";
+  if (input.hasBrowserPreview) return "browser";
+  return "preview";
+}
+
 const MARKDOWN_FILE_LINK_CLASS_NAME =
   "chat-markdown-file-link cursor-pointer transition-colors hover:bg-accent/70";
 
@@ -1223,7 +1238,21 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   onOpenInBrowser,
   className,
 }: MarkdownFileLinkProps) {
+  const outsideWorkspace = isMarkdownFileLinkOutsideWorkspace(workspaceRelativePath);
+  const handleUnavailable = useCallback(() => {
+    toastManager.add(
+      stackedThreadToast({
+        type: "error",
+        title: "File unavailable",
+        description: "This path is outside the thread workspace and cannot be opened.",
+      }),
+    );
+  }, []);
   const handleOpenInEditor = useCallback(() => {
+    if (outsideWorkspace) {
+      handleUnavailable();
+      return;
+    }
     void (async () => {
       try {
         const result = await onOpen(targetPath);
@@ -1256,17 +1285,32 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
         );
       }
     })();
-  }, [onOpen, targetPath]);
+  }, [handleUnavailable, onOpen, outsideWorkspace, targetPath]);
 
   const handleOpenInFilePreview = useCallback(() => {
-    if (!threadRef || !workspaceRelativePath) {
+    if (workspaceRelativePath === null) {
+      handleUnavailable();
+      return;
+    }
+    if (!threadRef) {
       handleOpenInEditor();
       return;
     }
     onOpenInPanel(workspaceRelativePath, line);
-  }, [handleOpenInEditor, line, onOpenInPanel, threadRef, workspaceRelativePath]);
+  }, [
+    handleOpenInEditor,
+    handleUnavailable,
+    line,
+    onOpenInPanel,
+    threadRef,
+    workspaceRelativePath,
+  ]);
 
   const handleOpenInBrowser = useCallback(() => {
+    if (outsideWorkspace) {
+      handleUnavailable();
+      return;
+    }
     if (!onOpenInBrowser) {
       return;
     }
@@ -1302,7 +1346,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
         );
       }
     })();
-  }, [onOpenInBrowser, targetPath]);
+  }, [handleUnavailable, onOpenInBrowser, outsideWorkspace, targetPath]);
 
   const handleCopy = useCallback(
     (value: string, title: string) => {
@@ -1400,15 +1444,25 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              if (shouldOpenMarkdownFileLinkInEditor(event)) {
-                handleOpenInEditor();
-                return;
+              const action = resolveMarkdownFileLinkPrimaryAction({
+                workspaceRelativePath,
+                openInEditor: shouldOpenMarkdownFileLinkInEditor(event),
+                hasBrowserPreview: onOpenInBrowser !== undefined,
+              });
+              switch (action) {
+                case "unavailable":
+                  handleUnavailable();
+                  return;
+                case "editor":
+                  handleOpenInEditor();
+                  return;
+                case "browser":
+                  handleOpenInBrowser();
+                  return;
+                case "preview":
+                  handleOpenInFilePreview();
+                  return;
               }
-              if (onOpenInBrowser) {
-                handleOpenInBrowser();
-                return;
-              }
-              handleOpenInFilePreview();
             }}
             onContextMenu={handleContextMenu}
           >

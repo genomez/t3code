@@ -1139,6 +1139,79 @@ describe("ProviderRuntimeIngestion", () => {
     ).toHaveLength(1);
   });
 
+  it("publishes explicit dynamic-tool image output but not imageView inspection", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-inspected-image"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-explicit-image"),
+      itemId: asRuntimeItemId("item-inspected-image"),
+      payload: {
+        itemType: "image_view",
+        status: "completed",
+        title: "View image",
+        data: {
+          item: {
+            type: "imageView",
+            id: "item-inspected-image",
+            path: "C:\\workspace\\private-reference.png",
+          },
+        },
+      },
+    });
+    await harness.drain();
+    expect(
+      (await harness.readModel()).threads
+        .find((entry) => entry.id === "thread-1")
+        ?.messages.some((message) => message.id === "assistant-image:item-inspected-image"),
+    ).toBe(false);
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-explicit-image"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-explicit-image"),
+      itemId: asRuntimeItemId("item-explicit-image"),
+      payload: {
+        itemType: "dynamic_tool_call",
+        status: "completed",
+        title: "Publish artifact",
+        data: {
+          item: {
+            type: "dynamicToolCall",
+            id: "item-explicit-image",
+            tool: "publish_artifact",
+            status: "completed",
+            arguments: {},
+            contentItems: [
+              {
+                type: "inputImage",
+                imageUrl: `data:image/png;base64,${ONE_PIXEL_PNG_BASE64}`,
+              },
+            ],
+          },
+        },
+      },
+    });
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant-image:item-explicit-image" &&
+          (message.attachments?.length ?? 0) === 1,
+      ),
+    );
+    expect(
+      thread.messages.find((message) => message.id === "assistant-image:item-explicit-image")
+        ?.attachments,
+    ).toEqual([expect.objectContaining({ mimeType: "image/png", sizeBytes: 67 })]);
+  });
+
   it("preserves completed tool metadata on projected tool activities", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";

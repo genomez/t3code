@@ -1,8 +1,11 @@
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import type * as Types from "effect/Types";
@@ -13,6 +16,11 @@ import packageJson from "../../package.json" with { type: "json" };
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as McpSessionRegistry from "./McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
+import {
+  loadPublishedArtifact,
+  PublishArtifactInput,
+  PublishArtifactTool,
+} from "./ArtifactPublication.ts";
 import {
   PreviewSnapshotToolkitHandlersLive,
   PreviewStandardToolkitHandlersLive,
@@ -203,6 +211,83 @@ const registerPreviewSnapshot = Effect.fn("McpHttpServer.registerPreviewSnapshot
   });
 });
 
+const decodePublishArtifactInput = Schema.decodeUnknownOption(PublishArtifactInput);
+
+const publishArtifactFailure = (message: string, reason: string) =>
+  new McpSchema.CallToolResult({
+    isError: true,
+    structuredContent: { error: { reason } },
+    content: [{ type: "text", text: message }],
+  });
+
+const registerArtifactPublication = Effect.fn("McpHttpServer.registerArtifactPublication")(
+  function* () {
+    const server = yield* McpServer.McpServer;
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const tool = PublishArtifactTool;
+    yield* server.addTool({
+      tool: new McpSchema.Tool({
+        name: tool.name,
+        description: Tool.getDescription(tool),
+        inputSchema: Tool.getJsonSchema(tool),
+        annotations: {
+          ...Context.getOption(tool.annotations, Tool.Title).pipe(
+            Option.map((title) => ({ title })),
+            Option.getOrUndefined,
+          ),
+          readOnlyHint: Context.get(tool.annotations, Tool.Readonly),
+          destructiveHint: Context.get(tool.annotations, Tool.Destructive),
+          idempotentHint: Context.get(tool.annotations, Tool.Idempotent),
+          openWorldHint: Context.get(tool.annotations, Tool.OpenWorld),
+        },
+      }),
+      annotations: tool.annotations,
+      handle: (payload) =>
+        Effect.withFiber((fiber) => {
+          const invocation = Context.getUnsafe(
+            fiber.context,
+            McpInvocationContext.McpInvocationContext,
+          );
+          const artifact = Option.getOrUndefined(decodePublishArtifactInput(payload));
+          if (!artifact) {
+            return Effect.succeed(
+              publishArtifactFailure(
+                "Image unavailable: publish_artifact requires a non-empty path.",
+                "invalid-input",
+              ),
+            );
+          }
+          return loadPublishedArtifact({
+            workspaceRoot: invocation.workspaceRoot,
+            artifact,
+          }).pipe(
+            Effect.provideService(FileSystem.FileSystem, fileSystem),
+            Effect.provideService(Path.Path, path),
+            Effect.map((result) => {
+              if (result._tag === "Unavailable") {
+                return publishArtifactFailure(result.message, result.reason);
+              }
+              const metadata = {
+                name: result.name,
+                mimeType: result.mimeType,
+                sizeBytes: result.sizeBytes,
+              };
+              return new McpSchema.CallToolResult({
+                isError: false,
+                structuredContent: metadata,
+                content: [
+                  { type: "text", text: `Published ${result.name} to this conversation.` },
+                  { type: "image", data: result.bytes, mimeType: result.mimeType },
+                ],
+              });
+            }),
+          );
+        }),
+    });
+  },
+);
+
 const PreviewStandardToolkitRegistrationLive = McpServer.toolkit(PreviewStandardToolkit).pipe(
   Layer.provide(PreviewStandardToolkitHandlersLive),
 );
@@ -216,6 +301,13 @@ export const PreviewToolkitRegistrationLive = Layer.mergeAll(
   PreviewSnapshotRegistrationLive,
 );
 
+export const ArtifactToolkitRegistrationLive = Layer.effectDiscard(registerArtifactPublication());
+
+export const T3ToolkitRegistrationLive = Layer.mergeAll(
+  PreviewToolkitRegistrationLive,
+  ArtifactToolkitRegistrationLive,
+);
+
 const McpTransportLive = McpServer.layerHttp({
   name: "T3 Code",
   version: packageJson.version,
@@ -223,4 +315,4 @@ const McpTransportLive = McpServer.layerHttp({
   protocols: [McpProtocol.v2025_06_18],
 }).pipe(Layer.provide(McpAuthMiddlewareLive));
 
-export const layer = PreviewToolkitRegistrationLive.pipe(Layer.provideMerge(McpTransportLive));
+export const layer = T3ToolkitRegistrationLive.pipe(Layer.provideMerge(McpTransportLive));

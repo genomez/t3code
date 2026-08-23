@@ -14,6 +14,7 @@ import * as McpProviderSession from "./McpProviderSession.ts";
 export interface McpCredentialRequest {
   readonly threadId: ThreadId;
   readonly providerInstanceId: ProviderInstanceId;
+  readonly workspaceRoot?: string;
 }
 
 export interface McpIssuedCredential {
@@ -126,6 +127,7 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
       const scope: McpInvocationContext.McpInvocationScope = {
         environmentId,
         threadId: ThreadId.make(request.threadId),
+        ...(request.workspaceRoot ? { workspaceRoot: request.workspaceRoot } : {}),
         providerSessionId,
         providerInstanceId: ProviderInstanceId.make(request.providerInstanceId),
         capabilities: new Set(["preview"]),
@@ -140,6 +142,7 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
         config: {
           environmentId,
           threadId: scope.threadId,
+          ...(scope.workspaceRoot ? { workspaceRoot: scope.workspaceRoot } : {}),
           providerSessionId,
           providerInstanceId: scope.providerInstanceId,
           endpoint,

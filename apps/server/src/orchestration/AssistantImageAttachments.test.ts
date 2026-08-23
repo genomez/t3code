@@ -95,6 +95,74 @@ describe("extractAssistantImageInputs", () => {
     ]);
   });
 
+  it("extracts image content intentionally returned by a dynamic tool", () => {
+    expect(
+      extractAssistantImageInputs({
+        item: {
+          type: "dynamicToolCall",
+          tool: "render_contact_sheet",
+          contentItems: [
+            { type: "inputText", text: "contact sheet ready" },
+            {
+              type: "inputImage",
+              imageUrl: `data:image/png;base64,${ONE_PIXEL_PNG_BASE64}`,
+            },
+          ],
+        },
+      }),
+    ).toEqual([
+      {
+        _tag: "data-url",
+        dataUrl: `data:image/png;base64,${ONE_PIXEL_PNG_BASE64}`,
+        name: "assistant-image.png",
+      },
+    ]);
+  });
+
+  it("preserves explicit publish_artifact metadata as the attachment name", () => {
+    expect(
+      extractAssistantImageInputs({
+        item: {
+          type: "mcpToolCall",
+          tool: "publish_artifact",
+          result: {
+            structuredContent: {
+              name: "contact sheet with spaces.png",
+              mimeType: "image/png",
+              sizeBytes: 67,
+            },
+            content: [
+              { type: "text", text: "published" },
+              { type: "image", data: ONE_PIXEL_PNG_BASE64, mimeType: "image/png" },
+            ],
+          },
+        },
+      }),
+    ).toEqual([
+      {
+        _tag: "base64",
+        base64: ONE_PIXEL_PNG_BASE64,
+        mimeType: "image/png",
+        name: "contact sheet with spaces.png",
+      },
+    ]);
+  });
+
+  it("does not publish an imageView item that only records agent inspection", () => {
+    expect(
+      extractAssistantImageInputs(
+        {
+          item: {
+            type: "imageView",
+            id: "viewed-image-1",
+            path: "C:\\work files\\private reference.png",
+          },
+        },
+        { provider: ProviderDriverKind.make("codex") },
+      ),
+    ).toEqual([]);
+  });
+
   it("rejects oversized image data before decoding", () => {
     const oversizedBase64 = "A".repeat(Math.ceil(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / 3) * 4 + 4);
     expect(
