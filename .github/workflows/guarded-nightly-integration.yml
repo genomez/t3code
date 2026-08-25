@@ -1,0 +1,34 @@
+name: Guarded nightly integration
+
+on:
+  schedule:
+    - cron: "20 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: guarded-nightly-integration
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.repository == 'genomez/t3code'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the promoted source branch
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: custom-stable
+          fetch-depth: 0
+
+      - name: Prepare the newest unreviewed nightly
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STABLE_BRANCH: custom-stable
+          UPSTREAM_REPOSITORY: pingdotgg/t3code
+        run: .github/scripts/prepare-nightly-integration.sh
