@@ -40,6 +40,15 @@
         "buildType": "apk"
       }
     },
+    "preview:provisioning": {
+      "extends": "preview",
+      "env": {
+        "EXPO_PUBLIC_T3_TEST_PROVISIONING": "1"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
     "production": {
       "corepack": true,
       "env": {

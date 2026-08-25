@@ -602,6 +602,13 @@ function deriveTurnFolds(input: {
       if (entry.id === firstAssistantEntry?.id || entry.id === group.terminalEntry?.id) {
         continue;
       }
+      if (
+        entry.kind === "message" &&
+        entry.message.role === "assistant" &&
+        (entry.message.attachments?.length ?? 0) > 0
+      ) {
+        continue;
+      }
       // Agent-spawn CTA rows never fold: workflows outlive their launching
       // turn (dynamic spawns, background execution), and folding the CTA
       // when the turn settles makes a still-running fleet invisible.

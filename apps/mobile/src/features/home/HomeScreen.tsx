@@ -57,6 +57,10 @@ import {
   type ThreadListV2ListItem,
 } from "../threads/threadListV2";
 import { useThreadListV2ShelfPreferences } from "../threads/use-thread-list-v2-shelf-preferences";
+import {
+  completionAttentionSessionStartedAt,
+  hasUnseenThreadCompletion,
+} from "../threads/threadCompletionAttention";
 import type { HomeListFilterMenuEnvironment } from "./home-list-filter-menu";
 import {
   buildHomeListLayout,
@@ -208,6 +212,18 @@ export function HomeScreen(props: HomeScreenProps) {
     ReadonlyMap<string, HomeGroupDisplayState>
   >(() => new Map());
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
+  const completionAttentionState = useMemo(() => {
+    const preferences = AsyncResult.isSuccess(preferencesResult) ? preferencesResult.value : {};
+    return {
+      completionAttentionStartedAt:
+        preferences.completionAttentionStartedAt ?? completionAttentionSessionStartedAt,
+      threadLastVisitedAtById: preferences.threadLastVisitedAtById,
+    };
+  }, [preferencesResult]);
+  const threadHasUnseenCompletion = useCallback(
+    (thread: EnvironmentThreadShell) => hasUnseenThreadCompletion(thread, completionAttentionState),
+    [completionAttentionState],
+  );
   const threadListV2Enabled = useThreadListV2Enabled();
   const autoSettleOnMerge =
     !AsyncResult.isSuccess(preferencesResult) ||
@@ -809,6 +825,7 @@ export function HomeScreen(props: HomeScreenProps) {
       return (
         <ThreadListV2Row
           thread={thread}
+          hasUnseenCompletion={threadHasUnseenCompletion(thread)}
           variant={item.item.variant}
           snoozed={item.item.snoozed}
           pinned={item.item.pinned}
@@ -907,6 +924,7 @@ export function HomeScreen(props: HomeScreenProps) {
       v2ProjectTitleByProjectKey,
       props.searchQuery,
       nowMinute,
+      threadHasUnseenCompletion,
     ],
   );
   const v2KeyExtractor = useCallback((item: ThreadListV2ListItem) => item.key, []);
@@ -922,11 +940,13 @@ export function HomeScreen(props: HomeScreenProps) {
       serverConfigs,
       savedConnectionsById: props.savedConnectionsById,
       searchQuery: props.searchQuery,
+      completionAttentionState,
       snoozePresetMinute: nowMinute,
       threadSearchMatchByKey,
     }),
     [
       projectByKey,
+      completionAttentionState,
       projectCwdByKey,
       props.searchQuery,
       props.savedConnectionsById,
@@ -939,12 +959,19 @@ export function HomeScreen(props: HomeScreenProps) {
 
   const extraData = useMemo(
     () => ({
+      completionAttentionState,
       projectCwdByKey,
       savedConnectionsById: props.savedConnectionsById,
       searchQuery: props.searchQuery,
       threadSearchMatchByKey,
     }),
-    [projectCwdByKey, props.savedConnectionsById, props.searchQuery, threadSearchMatchByKey],
+    [
+      completionAttentionState,
+      projectCwdByKey,
+      props.savedConnectionsById,
+      props.searchQuery,
+      threadSearchMatchByKey,
+    ],
   );
 
   const renderItem = useCallback(
@@ -989,6 +1016,7 @@ export function HomeScreen(props: HomeScreenProps) {
             <ThreadListRow
               variant="compact"
               thread={thread}
+              hasUnseenCompletion={threadHasUnseenCompletion(thread)}
               environmentLabel={
                 props.savedConnectionsById[thread.environmentId]?.environmentLabel ?? null
               }
@@ -1040,6 +1068,7 @@ export function HomeScreen(props: HomeScreenProps) {
       props.searchQuery,
       props.savedConnectionsById,
       threadSearchMatchByKey,
+      threadHasUnseenCompletion,
       titleRegenerationEnvironmentIds,
       updateGroupDisplay,
     ],

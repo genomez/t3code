@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import {
   AuthSessionId,
   RpcClientId,
+  ThreadId,
   type HostPowerSnapshot,
   type ClientActivityReportInput,
 } from "@t3tools/contracts";
@@ -95,6 +96,28 @@ describe("BackgroundPolicy", () => {
       assert.equal(yield* policy.hasDemand({ type: "vcs-status", cwd: "/other" }), false);
       assert.equal(yield* policy.shouldRunScopeWork({ type: "vcs-status", cwd: "/repo" }), true);
       assert.equal(yield* policy.shouldRunScopeWork({ type: "vcs-status", cwd: "/other" }), false);
+    }).pipe(Effect.provide(makeLayer(nominalHostPower))),
+  );
+
+  it.effect("preserves a focused Windows thread scope in the policy lease", () =>
+    Effect.gen(function* () {
+      const policy = yield* BackgroundPolicy.BackgroundPolicy;
+      yield* policy.reportClientActivity(
+        AuthSessionId.make("session-windows-thread"),
+        RpcClientId.make(1),
+        makeReport({
+          clientKind: "desktop-renderer",
+          scopes: [{ type: "thread", threadId: ThreadId.make("thread-focused-route") }],
+        }),
+      );
+
+      const snapshot = yield* policy.snapshot;
+      assert.deepStrictEqual(snapshot.leases[0]?.scopes, [
+        { type: "thread", threadId: ThreadId.make("thread-focused-route") },
+      ]);
+      assert.equal(snapshot.leases[0]?.clientKind, "desktop-renderer");
+      assert.equal(snapshot.leases[0]?.visible, true);
+      assert.equal(snapshot.leases[0]?.focused, true);
     }).pipe(Effect.provide(makeLayer(nominalHostPower))),
   );
 

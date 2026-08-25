@@ -150,6 +150,32 @@ describe("resolveThreadListV2Status", () => {
       "ready",
     );
   });
+
+  it("shows Done for a quiescent completion that has not been viewed", () => {
+    expect(
+      resolveThreadListV2Status(makeThread({ id: ThreadId.make("t"), title: "t" }), {
+        hasUnseenCompletion: true,
+      }),
+    ).toBe("done");
+  });
+
+  it("keeps failure priority over completion attention", () => {
+    const failed = makeThread({
+      id: ThreadId.make("t"),
+      title: "t",
+      session: {
+        threadId: ThreadId.make("t"),
+        status: "error",
+        providerName: "Codex",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        runtimeMode: "full-access",
+        activeTurnId: null,
+        lastError: "failed",
+        updatedAt: NOW,
+      },
+    });
+    expect(resolveThreadListV2Status(failed, { hasUnseenCompletion: true })).toBe("failed");
+  });
 });
 
 describe("resolveThreadListV2SwipeActions", () => {

@@ -12,6 +12,7 @@ export type McpCapability = "preview";
 export interface McpInvocationScope {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
+  readonly workspaceRoot?: string;
   readonly providerSessionId: string;
   readonly providerInstanceId: ProviderInstanceId;
   readonly capabilities: ReadonlySet<McpCapability>;

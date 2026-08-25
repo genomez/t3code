@@ -3,7 +3,9 @@ import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { EnvironmentId, PreviewTabId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
 import { McpProtocol, McpSchema, McpServer } from "effect/unstable/ai";
 import { HttpBody, HttpClient, HttpRouter, HttpServerResponse } from "effect/unstable/http";
@@ -38,6 +40,14 @@ const TestLayer = McpHttpServer.PreviewToolkitRegistrationLive.pipe(
   Layer.provideMerge(McpServer.McpServer.layer),
   Layer.provideMerge(PreviewAutomationBroker.layer.pipe(Layer.provide(NodeServices.layer))),
 );
+const ArtifactTestLayer = McpHttpServer.ArtifactToolkitRegistrationLive.pipe(
+  Layer.provideMerge(McpServer.McpServer.layer),
+  Layer.provideMerge(NodeServices.layer),
+);
+const ONE_PIXEL_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2ZQAAAABJRU5ErkJggg==",
+  "base64",
+);
 
 it("normalizes empty successful notification responses to accepted", () => {
   const notificationResponse = McpHttpServer.normalizeMcpHttpResponse(
@@ -50,6 +60,78 @@ it("normalizes empty successful notification responses to accepted", () => {
   );
   expect(resultResponse.status).toBe(200);
 });
+
+it.effect("publishes only validated workspace images through the explicit artifact tool", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const workspaceRoot = yield* fileSystem.makeTempDirectoryScoped({
+      prefix: "t3-publish-workspace-",
+    });
+    const outsideRoot = yield* fileSystem.makeTempDirectoryScoped({
+      prefix: "t3-publish-outside-",
+    });
+    const imagePath = path.join(workspaceRoot, "contact sheet with spaces.png");
+    const invalidImagePath = path.join(workspaceRoot, "not-an-image.png");
+    const outsidePath = path.join(outsideRoot, "private.png");
+    yield* fileSystem.writeFile(imagePath, ONE_PIXEL_PNG);
+    yield* fileSystem.writeFileString(invalidImagePath, "not an image");
+    yield* fileSystem.writeFile(outsidePath, ONE_PIXEL_PNG);
+
+    const server = yield* McpServer.McpServer;
+    const artifactInvocation = { ...invocation, workspaceRoot };
+    const published = yield* server
+      .callTool({
+        name: "publish_artifact",
+        arguments: { path: "contact sheet with spaces.png" },
+      })
+      .pipe(
+        Effect.provideService(McpInvocationContext.McpInvocationContext, artifactInvocation),
+        Effect.provideService(McpSchema.McpServerClient, client),
+      );
+    expect(published.isError).toBe(false);
+    expect(published.structuredContent).toEqual({
+      name: "contact sheet with spaces.png",
+      mimeType: "image/png",
+      sizeBytes: ONE_PIXEL_PNG.byteLength,
+    });
+    expect(published.content.some((content) => content.type === "image")).toBe(true);
+
+    const outside = yield* server
+      .callTool({
+        name: "publish_artifact",
+        arguments: { path: outsidePath },
+      })
+      .pipe(
+        Effect.provideService(McpInvocationContext.McpInvocationContext, artifactInvocation),
+        Effect.provideService(McpSchema.McpServerClient, client),
+      );
+    expect(outside.isError).toBe(true);
+    expect(outside.content).toEqual([
+      {
+        type: "text",
+        text: "Image unavailable: this path is outside the active thread workspace.",
+      },
+    ]);
+
+    const invalidImage = yield* server
+      .callTool({
+        name: "publish_artifact",
+        arguments: { path: invalidImagePath },
+      })
+      .pipe(
+        Effect.provideService(McpInvocationContext.McpInvocationContext, artifactInvocation),
+        Effect.provideService(McpSchema.McpServerClient, client),
+      );
+    expect(invalidImage.isError).toBe(true);
+    expect(invalidImage.content).toEqual([
+      {
+        type: "text",
+        text: "Image unavailable: only validated JPG and PNG files can be published.",
+      },
+    ]);
+  }).pipe(Effect.scoped, Effect.provide(ArtifactTestLayer)),
+);
 
 it.effect("returns bounded structural preview snapshot failures", () =>
   Effect.scoped(

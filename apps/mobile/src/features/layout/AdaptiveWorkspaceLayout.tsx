@@ -2,7 +2,13 @@ import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
-import { EnvironmentId, ThreadId, type SidebarProjectGroupingMode } from "@t3tools/contracts";
+import { effectiveSettled, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
+import {
+  EnvironmentId,
+  ThreadId,
+  type ScopedThreadRef,
+  type SidebarProjectGroupingMode,
+} from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { useFocusEffect } from "@react-navigation/native";
 import {
@@ -20,9 +26,16 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
-import { useWindowDimensions, View } from "react-native";
-import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import { Platform, useWindowDimensions, View } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 import { AsyncResult } from "effect/unstable/reactivity";
 
 import {
@@ -34,8 +47,12 @@ import {
   type WorkspaceAuxiliaryPaneRole,
   type WorkspacePaneLayout,
 } from "../../lib/layout";
-import { resolveThreadSelectionNavigationAction } from "../../lib/adaptive-navigation";
+import {
+  resolveThreadSelectionNavigationAction,
+  shouldInvalidateSelectedThreadDetail,
+} from "../../lib/adaptive-navigation";
 import { scopedThreadKey } from "../../lib/scopedEntities";
+import { useThreadShell } from "../../state/entities";
 import { mobilePreferencesAtom } from "../../state/preferences";
 import {
   DEFAULT_MOBILE_PROJECT_GROUPING_SETTINGS,
@@ -49,6 +66,10 @@ import { AndroidHomeFabLayout } from "../home/AndroidHomeFab";
 import { HomeListOptionsProvider } from "../home/home-list-options";
 import { ThreadNavigationSidebar } from "../threads/ThreadNavigationSidebar";
 import { WORKSPACE_PANE_TIMING } from "./workspace-pane-animation";
+import {
+  shouldStartWorkspaceSidebarSwipe,
+  shouldToggleWorkspaceSidebarForSwipe,
+} from "./workspace-sidebar-swipe";
 import { WorkspaceInspectorPane } from "./workspace-inspector-pane";
 
 interface AdaptiveWorkspaceContextValue {
@@ -102,12 +123,116 @@ export function useAdaptiveWorkspaceLayout(): AdaptiveWorkspaceContextValue {
   return use(AdaptiveWorkspaceContext);
 }
 
+function SelectedThreadLifecycleObserver(props: {
+  readonly latestSelectedThreadKey: RefObject<string | null>;
+  readonly onInvalidate: () => void;
+  readonly selectedThreadKey: string | null;
+  readonly selectedThreadRef: ScopedThreadRef | null;
+}) {
+  const { latestSelectedThreadKey, onInvalidate, selectedThreadKey, selectedThreadRef } = props;
+  const selectedThread = useThreadShell(selectedThreadRef);
+  const lifecycleRef = useRef({
+    key: selectedThreadKey,
+    present: false,
+    settled: false,
+    snoozed: false,
+  });
+
+  useEffect(() => {
+    const selectedShellMatchesRoute =
+      selectedThreadKey !== null &&
+      selectedThread !== null &&
+      scopedThreadKey(selectedThread.environmentId, selectedThread.id) === selectedThreadKey;
+    const now = new Date().toISOString();
+    const current = {
+      key: selectedThreadKey,
+      present: selectedShellMatchesRoute,
+      settled:
+        selectedShellMatchesRoute &&
+        effectiveSettled(selectedThread, {
+          now,
+          autoSettleAfterDays: 3,
+        }),
+      snoozed: selectedShellMatchesRoute && effectiveSnoozed(selectedThread, { now }),
+    };
+    const previous = lifecycleRef.current;
+    lifecycleRef.current = current;
+    if (
+      latestSelectedThreadKey.current === current.key &&
+      shouldInvalidateSelectedThreadDetail({ previous, current })
+    ) {
+      onInvalidate();
+    }
+  }, [latestSelectedThreadKey, onInvalidate, selectedThread, selectedThreadKey]);
+
+  return null;
+}
+
 export function useAdaptiveWorkspacePaneRole(role: WorkspaceAuxiliaryPaneRole) {
   const { activateAuxiliaryPaneRole } = useAdaptiveWorkspaceLayout();
 
   useFocusEffect(
     useCallback(() => activateAuxiliaryPaneRole(role), [activateAuxiliaryPaneRole, role]),
   );
+}
+
+function WorkspaceSidebarSwipeSurface(props: {
+  readonly enabled: boolean;
+  readonly primarySidebarVisible: boolean;
+  readonly onToggleSidebar: () => void;
+  readonly children: ReactNode;
+  readonly contentSettledWidth: number | null;
+}) {
+  const swipeGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .enabled(props.enabled)
+        .activeOffsetX([-12, 12])
+        .failOffsetY([-32, 32])
+        // Only swipes that begin inside the left-edge band toggle the sidebar.
+        // Horizontal content elsewhere (terminal, code blocks, diffs) scrolls
+        // on its own; letting this pan stay live across the whole pane would
+        // steal those gestures and flip the sidebar on a mid-screen swipe.
+        .onTouchesDown((event, stateManager) => {
+          if (!shouldStartWorkspaceSidebarSwipe(event.allTouches[0]?.x ?? 0)) {
+            stateManager.fail();
+          }
+        })
+        .onEnd((event) => {
+          if (
+            !shouldToggleWorkspaceSidebarForSwipe({
+              primarySidebarVisible: props.primarySidebarVisible,
+              translationX: event.translationX,
+              velocityX: event.velocityX,
+            })
+          ) {
+            return;
+          }
+          runOnJS(props.onToggleSidebar)();
+        }),
+    [props.enabled, props.onToggleSidebar, props.primarySidebarVisible],
+  );
+
+  const content = (
+    <View
+      className="flex-1 overflow-hidden bg-screen"
+      collapsable={false}
+      style={{ position: "relative" }}
+    >
+      <View
+        collapsable={false}
+        style={
+          props.contentSettledWidth !== null
+            ? { flex: 1, width: props.contentSettledWidth }
+            : { flex: 1 }
+        }
+      >
+        {props.children}
+      </View>
+    </View>
+  );
+
+  return <GestureDetector gesture={swipeGesture}>{content}</GestureDetector>;
 }
 
 /**
@@ -190,6 +315,7 @@ export function useRegisterWorkspaceInspector(render: (() => ReactNode) | undefi
 
 export function AdaptiveWorkspaceLayout(props: {
   readonly children: ReactNode;
+  readonly onInvalidateSelectedThreadDetail: () => void;
   readonly pathname: string;
 }) {
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
@@ -213,12 +339,14 @@ export function AdaptiveWorkspaceLayout(props: {
 function AdaptiveWorkspaceLayoutContent(
   props: {
     readonly children: ReactNode;
+    readonly onInvalidateSelectedThreadDetail: () => void;
     readonly pathname: string;
   } & {
     readonly projectGroupingMode: SidebarProjectGroupingMode;
   },
 ) {
   const projectGroupingMode = props.projectGroupingMode;
+  const onInvalidateSelectedThreadDetail = props.onInvalidateSelectedThreadDetail;
   const { width, height } = useWindowDimensions();
   const pathname = props.pathname;
   const navigation = useNavigation();
@@ -292,16 +420,27 @@ function AdaptiveWorkspaceLayoutContent(
   const activeThread = parseActiveThreadPath(pathname);
   const environmentId = activeThread?.environmentId ?? null;
   const threadId = activeThread?.threadId ?? null;
-  const selectedThreadKey = useMemo(() => {
+  const selectedThreadRef = useMemo(() => {
     if (environmentId === null || threadId === null) {
       return null;
     }
     try {
-      return scopedThreadKey(EnvironmentId.make(environmentId), ThreadId.make(threadId));
+      return {
+        environmentId: EnvironmentId.make(environmentId),
+        threadId: ThreadId.make(threadId),
+      };
     } catch {
       return null;
     }
   }, [environmentId, threadId]);
+  const selectedThreadKey =
+    selectedThreadRef === null
+      ? null
+      : scopedThreadKey(selectedThreadRef.environmentId, selectedThreadRef.threadId);
+  const selectedThreadKeyRef = useRef(selectedThreadKey);
+  useEffect(() => {
+    selectedThreadKeyRef.current = selectedThreadKey;
+  }, [selectedThreadKey]);
   // Wrapped in an object: bare functions in useState would be treated as
   // lazy initializers/updaters. `active: false` keeps the outgoing route's
   // content mounted so the pane can animate closed (or be replaced
@@ -491,6 +630,7 @@ function AdaptiveWorkspaceLayoutContent(
 
   const handleSelectThread = useCallback(
     (thread: EnvironmentThreadShell) => {
+      const nextThreadKey = scopedThreadKey(thread.environmentId, thread.id);
       const params = {
         environmentId: String(thread.environmentId),
         threadId: String(thread.id),
@@ -500,14 +640,15 @@ function AdaptiveWorkspaceLayoutContent(
         pathname,
       });
       if (navigationAction === "set-params") {
-        const nextThreadKey = scopedThreadKey(thread.environmentId, thread.id);
         if (nextThreadKey === selectedThreadKey) {
           return;
         }
+        selectedThreadKeyRef.current = nextThreadKey;
         setFileInspectorPreferredVisible(false);
         navigation.navigate("Thread", params);
         return;
       }
+      selectedThreadKeyRef.current = nextThreadKey;
       if (navigationAction === "replace") {
         setFileInspectorPreferredVisible(false);
         navigation.dispatch(StackActions.replace("Thread", params));
@@ -521,6 +662,14 @@ function AdaptiveWorkspaceLayoutContent(
   return (
     <HomeListOptionsProvider projectGroupingMode={projectGroupingMode}>
       <AdaptiveWorkspaceContext.Provider value={contextValue}>
+        {layout.usesSplitView ? (
+          <SelectedThreadLifecycleObserver
+            latestSelectedThreadKey={selectedThreadKeyRef}
+            onInvalidate={onInvalidateSelectedThreadDetail}
+            selectedThreadKey={selectedThreadKey}
+            selectedThreadRef={selectedThreadRef}
+          />
+        ) : null}
         <View testID="adaptive-workspace-layout" className="flex-1 flex-row">
           {shouldRenderPrimarySidebar && layout.listPaneWidth !== null ? (
             <Animated.View
@@ -551,16 +700,14 @@ function AdaptiveWorkspaceLayoutContent(
               </View>
             </Animated.View>
           ) : null}
-          <View className="flex-1 overflow-hidden bg-screen" collapsable={false}>
-            <View
-              collapsable={false}
-              style={
-                contentSettledWidth !== null ? { flex: 1, width: contentSettledWidth } : { flex: 1 }
-              }
-            >
-              {props.children}
-            </View>
-          </View>
+          <WorkspaceSidebarSwipeSurface
+            enabled={Platform.OS === "android" && layout.usesSplitView}
+            primarySidebarVisible={panes.primarySidebarVisible}
+            onToggleSidebar={togglePrimarySidebar}
+            contentSettledWidth={contentSettledWidth}
+          >
+            {props.children}
+          </WorkspaceSidebarSwipeSurface>
           <WorkspaceInspectorPane
             active={workspaceInspector?.active ?? false}
             panes={panes}

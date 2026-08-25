@@ -19,6 +19,7 @@ import {
   type OrchestrationCommand,
   ProjectId,
   ProviderItemId,
+  RuntimeItemId,
   type ServerSettings,
   ThreadId,
   TurnId,
@@ -62,10 +63,14 @@ function makeTestServerSettingsLayer(overrides: Partial<ServerSettings> = {}) {
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
 const asItemId = (value: string): ProviderItemId => ProviderItemId.make(value);
+const asRuntimeItemId = (value: string): RuntimeItemId => RuntimeItemId.make(value);
 const asEventId = (value: string): EventId => EventId.make(value);
 const asMessageId = (value: string): MessageId => MessageId.make(value);
 const asThreadId = (value: string): ThreadId => ThreadId.make(value);
 const asTurnId = (value: string): TurnId => TurnId.make(value);
+const ONE_PIXEL_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2ZQAAAABJRU5ErkJggg==";
+const MINIMAL_JPEG_BASE64 = "/9j/2Q==";
 
 type LegacyProviderRuntimeEvent = {
   readonly type: string;
@@ -252,7 +257,9 @@ describe("ProviderRuntimeIngestion", () => {
       Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
       Layer.provideMerge(makeTestServerSettingsLayer(options?.serverSettings)),
-      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+      Layer.provideMerge(
+        ServerConfig.layerTest(process.cwd(), { prefix: "t3-provider-ingestion-test-" }),
+      ),
       Layer.provideMerge(NodeServices.layer),
     );
     runtime = ManagedRuntime.make(layer);
@@ -1060,6 +1067,149 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(message?.text).toBe("assistant-only final text");
     expect(message?.streaming).toBe(false);
+  });
+
+  it("persists native tool images as first-class assistant attachments once", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+    const imageEvent = ProviderRuntimeEvent.make({
+      type: "item.completed",
+      eventId: asEventId("evt-native-tool-images"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-native-tool-images"),
+      itemId: asRuntimeItemId("item-native-tool-images"),
+      payload: {
+        itemType: "mcp_tool_call",
+        status: "completed",
+        title: "view_image",
+        data: {
+          item: {
+            type: "mcpToolCall",
+            result: {
+              content: [
+                { type: "text", text: "two generated images" },
+                {
+                  type: "image",
+                  data: ONE_PIXEL_PNG_BASE64,
+                  mimeType: "image/png",
+                  name: "contact sheet.png",
+                },
+                {
+                  type: "image",
+                  data: MINIMAL_JPEG_BASE64,
+                  mimeType: "image/jpeg",
+                  name: "detail.jpg",
+                },
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    harness.emit(imageEvent);
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant-image:item-native-tool-images" &&
+          (message.attachments?.length ?? 0) === 2,
+      ),
+    );
+    const imageMessage = thread.messages.find(
+      (message: ProviderRuntimeTestMessage) =>
+        message.id === "assistant-image:item-native-tool-images",
+    );
+    expect(imageMessage?.role).toBe("assistant");
+    expect(imageMessage?.text).toBe("");
+    expect(imageMessage?.attachments).toEqual([
+      expect.objectContaining({ name: "contact sheet.png", mimeType: "image/png", sizeBytes: 67 }),
+      expect.objectContaining({ name: "detail.jpg", mimeType: "image/jpeg", sizeBytes: 4 }),
+    ]);
+    expect(JSON.stringify(imageMessage)).not.toContain(ONE_PIXEL_PNG_BASE64);
+
+    harness.emit(imageEvent);
+    await harness.drain();
+    const afterDuplicate = await harness.readModel();
+    expect(
+      afterDuplicate.threads
+        .find((entry) => entry.id === "thread-1")
+        ?.messages.filter((message) => message.id === "assistant-image:item-native-tool-images"),
+    ).toHaveLength(1);
+  });
+
+  it("publishes explicit dynamic-tool image output but not imageView inspection", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-inspected-image"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-explicit-image"),
+      itemId: asRuntimeItemId("item-inspected-image"),
+      payload: {
+        itemType: "image_view",
+        status: "completed",
+        title: "View image",
+        data: {
+          item: {
+            type: "imageView",
+            id: "item-inspected-image",
+            path: "C:\\workspace\\private-reference.png",
+          },
+        },
+      },
+    });
+    await harness.drain();
+    expect(
+      (await harness.readModel()).threads
+        .find((entry) => entry.id === "thread-1")
+        ?.messages.some((message) => message.id === "assistant-image:item-inspected-image"),
+    ).toBe(false);
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-explicit-image"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-explicit-image"),
+      itemId: asRuntimeItemId("item-explicit-image"),
+      payload: {
+        itemType: "dynamic_tool_call",
+        status: "completed",
+        title: "Publish artifact",
+        data: {
+          item: {
+            type: "dynamicToolCall",
+            id: "item-explicit-image",
+            tool: "publish_artifact",
+            status: "completed",
+            arguments: {},
+            contentItems: [
+              {
+                type: "inputImage",
+                imageUrl: `data:image/png;base64,${ONE_PIXEL_PNG_BASE64}`,
+              },
+            ],
+          },
+        },
+      },
+    });
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant-image:item-explicit-image" &&
+          (message.attachments?.length ?? 0) === 1,
+      ),
+    );
+    expect(
+      thread.messages.find((message) => message.id === "assistant-image:item-explicit-image")
+        ?.attachments,
+    ).toEqual([expect.objectContaining({ mimeType: "image/png", sizeBytes: 67 })]);
   });
 
   it("preserves completed tool metadata on projected tool activities", async () => {

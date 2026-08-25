@@ -16,7 +16,80 @@ vi.mock("../state/entities", () => ({
 vi.mock("../editorPreferences", () => ({ useOpenInPreferredEditor: () => vi.fn() }));
 vi.mock("~/lib/openPullRequestLink", () => ({ useOpenChangeRequestLink: () => vi.fn() }));
 
-import ChatMarkdown, { orderedListGutterStyle } from "./ChatMarkdown";
+import ChatMarkdown, {
+  isMarkdownFileLinkOutsideWorkspace,
+  normalizeCodeBlockClipboardText,
+  orderedListGutterStyle,
+  resolveMarkdownFileLinkPrimaryAction,
+} from "./ChatMarkdown";
+
+describe("isMarkdownFileLinkOutsideWorkspace", () => {
+  it("blocks links that cannot be resolved inside the active workspace", () => {
+    expect(isMarkdownFileLinkOutsideWorkspace(null)).toBe(true);
+    expect(isMarkdownFileLinkOutsideWorkspace("output/contact sheet.jpg")).toBe(false);
+  });
+
+  it("never falls back to editor or browser launch for an outside-workspace path", () => {
+    expect(
+      resolveMarkdownFileLinkPrimaryAction({
+        workspaceRelativePath: null,
+        openInEditor: true,
+        hasBrowserPreview: true,
+        browserFirst: true,
+      }),
+    ).toBe("unavailable");
+  });
+
+  it("preserves ordinary actions for workspace files", () => {
+    const workspaceRelativePath = "output/contact sheet.jpg";
+    expect(
+      resolveMarkdownFileLinkPrimaryAction({
+        workspaceRelativePath,
+        openInEditor: true,
+        hasBrowserPreview: true,
+        browserFirst: true,
+      }),
+    ).toBe("editor");
+    expect(
+      resolveMarkdownFileLinkPrimaryAction({
+        workspaceRelativePath,
+        openInEditor: false,
+        hasBrowserPreview: true,
+        browserFirst: true,
+      }),
+    ).toBe("browser");
+    expect(
+      resolveMarkdownFileLinkPrimaryAction({
+        workspaceRelativePath,
+        openInEditor: false,
+        hasBrowserPreview: true,
+        browserFirst: false,
+      }),
+    ).toBe("preview");
+    expect(
+      resolveMarkdownFileLinkPrimaryAction({
+        workspaceRelativePath,
+        openInEditor: false,
+        hasBrowserPreview: false,
+        browserFirst: true,
+      }),
+    ).toBe("preview");
+  });
+});
+
+describe("normalizeCodeBlockClipboardText", () => {
+  it.each([
+    ["NOZZLECAM_EXPOSURE VALUE=300\n", "NOZZLECAM_EXPOSURE VALUE=300"],
+    ["first\nsecond\n", "first\nsecond"],
+    ["first\nsecond\n\n", "first\nsecond\n"],
+    ["first\r\nsecond\r\n", "first\r\nsecond"],
+    ["trailing spaces  \n", "trailing spaces  "],
+    ["already exact", "already exact"],
+    ["", ""],
+  ])("removes exactly one structural terminal line ending from %j", (input, expected) => {
+    expect(normalizeCodeBlockClipboardText(input)).toBe(expected);
+  });
+});
 
 describe("orderedListGutterStyle", () => {
   it("leaves the default gutter alone for single-digit lists", () => {

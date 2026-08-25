@@ -1217,7 +1217,13 @@ function deriveThreadFeedTurnFolds(
       entries
         .filter(
           (entry) =>
-            entry.id !== firstAssistantMessageId && entry.id !== terminalAssistantMessageId,
+            entry.id !== firstAssistantMessageId &&
+            entry.id !== terminalAssistantMessageId &&
+            !(
+              entry.type === "message" &&
+              entry.message.role === "assistant" &&
+              (entry.message.attachments?.length ?? 0) > 0
+            ),
         )
         .map((entry) => entry.id),
     );

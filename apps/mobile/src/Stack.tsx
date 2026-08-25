@@ -1,21 +1,32 @@
 import {
+  CommonActions,
   createPathConfigForStaticNavigation,
   getPathFromState,
   NavigationState,
   StackActions,
   useNavigation,
+  type PartialState,
 } from "@react-navigation/native";
 import {
   createNativeStackNavigator,
   createNativeStackScreen,
   type NativeStackNavigationOptions,
 } from "@react-navigation/native-stack";
-import { useEffect, useRef } from "react";
-import { Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { useCallback, useEffect, useRef } from "react";
+import {
+  AppState,
+  DynamicColorIOS,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from "react-native";
 import { useResolveClassNames } from "uniwind";
 
 import { AppText as Text } from "./components/AppText";
 import { getCompactBrandHeaderOptions } from "./components/CompactBrandTitle";
+import { dismissAndroidAgentCompletionNotification } from "./features/agent-awareness/localNotifications";
 import { ArchivedThreadsRouteScreen } from "./features/archive/ArchivedThreadsRouteScreen";
 import { useAgentNotificationNavigation } from "./features/agent-awareness/notificationNavigation";
 import { ConnectOnboardingRouteScreen } from "./features/cloud/ConnectOnboardingRouteScreen";
@@ -23,6 +34,8 @@ import { useConnectOnboardingNavigation } from "./features/cloud/connectOnboardi
 import { ThreadFilesTreeScreen, ThreadFileScreen } from "./features/files/ThreadFilesRouteScreen";
 import { AdaptiveWorkspaceLayout } from "./features/layout/AdaptiveWorkspaceLayout";
 import { HardwareKeyboardCommandProvider } from "./features/keyboard/HardwareKeyboardCommandProvider";
+import { parseActiveThreadPath } from "./features/keyboard/hardwareKeyboardCommands";
+import { saveBackgroundConnectionRetainedThread } from "./features/background-connection/retained-thread";
 import { ReviewCommentComposerSheet } from "./features/review/ReviewCommentComposerSheet";
 import { ReviewSheet } from "./features/review/ReviewSheet";
 import { ThreadTerminalRouteScreen } from "./features/terminal/ThreadTerminalRouteScreen";
@@ -69,12 +82,20 @@ import {
   EMPTY_INCOMING_SHARE_PRESENTATION_STATE,
   transitionIncomingSharePresentation,
 } from "./features/sharing/incoming-share-presentation";
+import { resolveWorkspaceDetailInvalidationAction } from "./lib/adaptive-navigation";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "./native/native-glass";
 import { nativeHeaderScrollEdgeEffects } from "./native/StackHeader";
 import { FORM_SHEET_PRESENTATION_OPTIONS } from "./native/sheet-surface";
 import { useThreadOutboxDrain } from "./state/use-thread-outbox-drain";
 
 const HEADER_SCROLL_EDGE_EFFECTS = nativeHeaderScrollEdgeEffects(Platform.OS, Platform.Version);
+
+// Matches --color-sheet in global.css (light/dark). DynamicColorIOS lets the
+// native stack retain an opaque adaptive sheet surface on iOS.
+const SHEET_BACKGROUND_COLOR =
+  Platform.OS === "ios"
+    ? DynamicColorIOS({ light: "rgba(242, 242, 247, 0.98)", dark: "rgba(14, 14, 14, 0.98)" })
+    : undefined;
 
 type AppScreenOptions = NativeStackNavigationOptions & {
   readonly unstable_navigationItemStyle?: "editor";
@@ -385,18 +406,81 @@ function RootStackLayout(props: {
       params: { incomingShareId: transition.shareIdToPresent },
     });
   }, [navigation, pendingShare, props.state]);
+  const handleInvalidateSelectedThreadDetail = useCallback(() => {
+    const state = navigation.getState();
+    if (state === undefined) {
+      return;
+    }
+    const invalidation = resolveWorkspaceDetailInvalidationAction({
+      routes: state.routes,
+      overlayRouteNames: WORKSPACE_OVERLAY_ROUTES,
+    });
+    if (invalidation === null) {
+      return;
+    }
+    if (invalidation.type === "pop") {
+      navigation.dispatch({
+        ...StackActions.pop(invalidation.count),
+        source: invalidation.source,
+        target: state.key,
+      });
+      return;
+    }
+    navigation.dispatch({
+      ...CommonActions.reset({
+        index: invalidation.routes.length - 1,
+        routes: invalidation.routes.map((route) =>
+          "key" in route
+            ? {
+                key: route.key,
+                name: route.name,
+                params: route.params,
+                path: route.path,
+                state: route.state as PartialState<NavigationState> | undefined,
+              }
+            : route,
+        ),
+        stale: true,
+      }),
+      target: state.key,
+    });
+  }, [navigation]);
   // Full pathname (sheets included) for keyboard-command scoping; the
   // workspace layout only reacts to the underlying non-overlay route.
   const path = getPathFromState(props.state, navigationPathConfig);
   const pathname = path.startsWith("/") ? path : `/${path}`;
   const workspacePathname = workspacePathFromState(props.state);
+  const activeThread = parseActiveThreadPath(workspacePathname);
+
+  useEffect(() => {
+    if (Platform.OS !== "android" || activeThread === null) {
+      return;
+    }
+
+    const handleActiveThread = () => {
+      void saveBackgroundConnectionRetainedThread(activeThread);
+      void dismissAndroidAgentCompletionNotification(activeThread);
+    };
+
+    handleActiveThread();
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") {
+        handleActiveThread();
+      }
+    });
+
+    return () => subscription.remove();
+  }, [activeThread?.environmentId, activeThread?.threadId]);
 
   return (
     <HardwareKeyboardCommandProvider pathname={pathname}>
       <ThreadOutboxDrainWorker />
       <ShowcaseCaptureCoordinator pathname={pathname} />
       <ExistingThreadSettingsRouteProvider>
-        <AdaptiveWorkspaceLayout pathname={workspacePathname}>
+        <AdaptiveWorkspaceLayout
+          pathname={workspacePathname}
+          onInvalidateSelectedThreadDetail={handleInvalidateSelectedThreadDetail}
+        >
           {props.children}
         </AdaptiveWorkspaceLayout>
       </ExistingThreadSettingsRouteProvider>
@@ -455,6 +539,12 @@ export const RootStack = createNativeStackNavigator({
       linking: "",
       options: {
         ...GLASS_HEADER_OPTIONS,
+        // Android draws its own in-flow header (AndroidHomeHeader in compact,
+        // the sidebar brand + empty detail in split), so the native stack
+        // header must never mount there — runtime `headerShown` toggling does
+        // not reliably remove an already-shown native header and would leave
+        // a duplicate brand header in the split main pane.
+        headerShown: Platform.OS !== "android",
         contentStyle: { backgroundColor: "transparent" },
         headerBackVisible: false,
         ...getCompactBrandHeaderOptions(),
@@ -463,17 +553,31 @@ export const RootStack = createNativeStackNavigator({
     Thread: createNativeStackScreen({
       screen: ThreadRouteScreen,
       linking: THREAD_LINKING_PREFIX,
-      options: GLASS_HEADER_OPTIONS,
+      options: {
+        ...GLASS_HEADER_OPTIONS,
+        // Android draws its own in-flow header (AndroidScreenHeader in
+        // ThreadRouteScreen); the native stack header stays iOS-only. Keeping
+        // it disabled statically avoids a stale native header surviving a
+        // fold/unfold layout change (runtime headerShown toggling cannot
+        // reliably unmount an already-shown native header).
+        headerShown: Platform.OS !== "android",
+      },
     }),
     ThreadTerminal: createNativeStackScreen({
       screen: ThreadTerminalRouteScreen,
       linking: `${THREAD_LINKING_PREFIX}/terminal`,
-      options: SOLID_HEADER_OPTIONS,
+      options: {
+        ...SOLID_HEADER_OPTIONS,
+        headerShown: Platform.OS !== "android",
+      },
     }),
     ThreadReview: createNativeStackScreen({
       screen: ReviewSheet,
       linking: `${THREAD_LINKING_PREFIX}/review`,
-      options: SOLID_HEADER_OPTIONS,
+      options: {
+        ...SOLID_HEADER_OPTIONS,
+        headerShown: Platform.OS !== "android",
+      },
     }),
     ThreadReviewComment: createNativeStackScreen({
       screen: ReviewCommentComposerSheet,
@@ -493,6 +597,14 @@ export const RootStack = createNativeStackNavigator({
       linking: `${THREAD_LINKING_PREFIX}/files`,
       options: {
         ...GLASS_HEADER_OPTIONS,
+        // Android draws its own in-flow header (AndroidScreenHeader in
+        // ThreadFilesTreeScreen); keep the native header iOS-only statically
+        // so it cannot survive a fold/unfold layout change.
+        headerShown: Platform.OS !== "android",
+        contentStyle:
+          SHEET_BACKGROUND_COLOR !== undefined
+            ? { backgroundColor: SHEET_BACKGROUND_COLOR }
+            : undefined,
         title: "Files",
       },
     }),

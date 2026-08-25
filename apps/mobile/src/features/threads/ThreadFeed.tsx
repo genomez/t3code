@@ -28,6 +28,7 @@ import {
 } from "react-native-nitro-markdown";
 import {
   ActivityIndicator,
+  Alert,
   Image,
   Platform,
   type LayoutChangeEvent,
@@ -109,8 +110,8 @@ import {
 } from "./thread-work-log";
 import { useMarkdownCodeHighlight } from "./markdownCodeHighlightState";
 import { useAssetUrl, useAssetUrlState } from "../../state/assets";
-import { resolveWorkspaceRelativeFilePath } from "../files/filePath";
 import { MARKDOWN_IMAGE_MAX_WIDTH, resolveMarkdownImageDisplaySize } from "./markdownImageSize";
+import { resolveThreadMarkdownFileAction } from "./threadMarkdownFileAction";
 
 const WIDE_MARKDOWN_BLOCK_OPTIONS = {
   includeOrderedLists: Platform.OS === "android",
@@ -332,7 +333,7 @@ function ThreadMarkdownImage(props: {
   readonly alt: string | null;
   readonly onPressImage: (uri: string) => void;
 }) {
-  const assetUrl = useAssetUrlState(props.environmentId, {
+  const { status: assetUrl } = useAssetUrlState(props.environmentId, {
     _tag: "workspace-file",
     threadId: props.threadId,
     path: props.path,
@@ -1582,18 +1583,17 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     (href: string) => {
       const presentation = resolveMarkdownLinkPresentation(href);
       if (presentation.kind === "file") {
-        const relativePath = resolveWorkspaceRelativeFilePath(
-          props.workspaceRoot,
-          presentation.path,
-        );
-        if (relativePath) {
+        const action = resolveThreadMarkdownFileAction(props.workspaceRoot, presentation.path);
+        if (action._tag === "Open") {
           void Haptics.selectionAsync();
           navigation.navigate("ThreadFile", {
             environmentId: String(props.environmentId),
             threadId: String(props.threadId),
-            path: relativePath.split("/").filter((segment) => segment.length > 0),
+            path: action.relativePath.split("/").filter((segment) => segment.length > 0),
             ...(presentation.line ? { line: String(presentation.line) } : {}),
           });
+        } else {
+          Alert.alert("File unavailable", action.message);
         }
         return;
       }

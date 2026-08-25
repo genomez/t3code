@@ -139,6 +139,18 @@ export function rewriteMarkdownFileUriHref(href: string | undefined): string | n
   return `${target.path}${target.hash}`;
 }
 
+/**
+ * Rewrites a Windows drive destination into the `file:` form that survives
+ * React Markdown sanitization. The anchor renderer converts it back to the
+ * plain path before resolving the file action.
+ */
+export function toFilesystemLinkUrl(destination: string | undefined): string | null {
+  if (!destination) return null;
+  const normalized = normalizeMarkdownLinkDestination(destination);
+  if (!WINDOWS_DRIVE_PATH_PATTERN.test(normalized)) return null;
+  return `file:///${normalized.replaceAll("\\", "/")}`;
+}
+
 function looksLikePosixFilesystemPath(path: string): boolean {
   if (!path.startsWith("/")) return false;
   if (POSIX_FILE_ROOT_PREFIXES.some((prefix) => path.startsWith(prefix))) return true;

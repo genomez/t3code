@@ -74,6 +74,7 @@ import {
   serializeTableElementToMarkdown,
 } from "../markdown-clipboard";
 import { remarkNormalizeListItemIndentation } from "../markdown-list-indentation";
+import { remarkFilesystemLinkDestinations } from "../markdown-filesystem-links";
 import {
   extractMarkdownLinkHrefs,
   normalizeMarkdownLinkDestination,
@@ -82,6 +83,7 @@ import {
   rewriteMarkdownFileUriHref,
   shouldOpenMarkdownFileLinkInBrowserByDefault,
   shouldOpenMarkdownFileLinkInEditor,
+  toFilesystemLinkUrl,
   type MarkdownFileLinkMeta,
 } from "../markdown-links";
 import { readLocalApi } from "../localApi";
@@ -213,7 +215,7 @@ function rehypeNormalizeWindowsImageSrc() {
   };
 }
 
-const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
+export const CHAT_MARKDOWN_SANITIZE_SCHEMA: NonNullable<Parameters<typeof rehypeSanitize>[0]> = {
   ...defaultSchema,
   attributes: {
     ...defaultSchema.attributes,
@@ -226,12 +228,13 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
     href: [...(defaultSchema.protocols?.href ?? []), "file"],
     src: [...(defaultSchema.protocols?.src ?? []), "file"],
   },
-} satisfies Parameters<typeof rehypeSanitize>[0];
+};
 
 const CHAT_MARKDOWN_REMARK_PLUGINS = [
   remarkGfm,
   remarkGithubAlerts,
   remarkNormalizeListItemIndentation,
+  remarkFilesystemLinkDestinations,
   remarkPreserveCodeMeta,
   remarkNormalizeLinksAndTagInlineCode,
 ] satisfies NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
@@ -241,6 +244,7 @@ const CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS = [
   remarkGithubAlerts,
   remarkNormalizeListItemIndentation,
   remarkBreaks,
+  remarkFilesystemLinkDestinations,
   remarkPreserveCodeMeta,
   remarkNormalizeLinksAndTagInlineCode,
 ] satisfies NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
@@ -397,6 +401,12 @@ function nodeToPlainText(node: ReactNode): string {
     return nodeToPlainText(node.props.children);
   }
   return "";
+}
+
+export function normalizeCodeBlockClipboardText(code: string): string {
+  if (code.endsWith("\r\n")) return code.slice(0, -2);
+  if (code.endsWith("\n")) return code.slice(0, -1);
+  return code;
 }
 
 function extractCodeBlock(
@@ -682,7 +692,7 @@ function MarkdownCodeBlock({
       return;
     }
     void navigator.clipboard
-      .writeText(code)
+      .writeText(normalizeCodeBlockClipboardText(code))
       .then(() => {
         if (copiedTimerRef.current != null) {
           clearTimeout(copiedTimerRef.current);
@@ -871,6 +881,22 @@ interface MarkdownFileLinkProps {
   className?: string | undefined;
 }
 
+export function isMarkdownFileLinkOutsideWorkspace(workspaceRelativePath: string | null): boolean {
+  return workspaceRelativePath === null;
+}
+
+export function resolveMarkdownFileLinkPrimaryAction(input: {
+  readonly workspaceRelativePath: string | null;
+  readonly openInEditor: boolean;
+  readonly hasBrowserPreview: boolean;
+  readonly browserFirst: boolean;
+}): "unavailable" | "editor" | "browser" | "preview" {
+  if (isMarkdownFileLinkOutsideWorkspace(input.workspaceRelativePath)) return "unavailable";
+  if (input.openInEditor) return "editor";
+  if (input.hasBrowserPreview && input.browserFirst) return "browser";
+  return "preview";
+}
+
 const MARKDOWN_FILE_LINK_CLASS_NAME =
   "chat-markdown-file-link cursor-pointer transition-colors hover:bg-accent/70";
 
@@ -948,7 +974,7 @@ function extractInlineCodeSpans(text: string): string[] {
 }
 
 function normalizeMarkdownLinkHrefKey(href: string): string {
-  const normalizedHref = normalizeMarkdownLinkDestination(href);
+  const normalizedHref = toFilesystemLinkUrl(href) ?? normalizeMarkdownLinkDestination(href);
   const rewrittenHref = rewriteMarkdownFileUriHref(normalizedHref) ?? normalizedHref;
   return WINDOWS_DRIVE_PATH_REGEX.test(rewrittenHref)
     ? rewrittenHref.replaceAll("\\", "/")
@@ -1222,7 +1248,21 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   onOpenInBrowser,
   className,
 }: MarkdownFileLinkProps) {
+  const outsideWorkspace = isMarkdownFileLinkOutsideWorkspace(workspaceRelativePath);
+  const handleUnavailable = useCallback(() => {
+    toastManager.add(
+      stackedThreadToast({
+        type: "error",
+        title: "File unavailable",
+        description: "This path is outside the thread workspace and cannot be opened.",
+      }),
+    );
+  }, []);
   const handleOpenInEditor = useCallback(() => {
+    if (outsideWorkspace) {
+      handleUnavailable();
+      return;
+    }
     void (async () => {
       try {
         const result = await onOpen(targetPath);
@@ -1255,17 +1295,32 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
         );
       }
     })();
-  }, [onOpen, targetPath]);
+  }, [handleUnavailable, onOpen, outsideWorkspace, targetPath]);
 
   const handleOpenInFilePreview = useCallback(() => {
-    if (!threadRef || !workspaceRelativePath) {
+    if (workspaceRelativePath === null) {
+      handleUnavailable();
+      return;
+    }
+    if (!threadRef) {
       handleOpenInEditor();
       return;
     }
     onOpenInPanel(workspaceRelativePath, line);
-  }, [handleOpenInEditor, line, onOpenInPanel, threadRef, workspaceRelativePath]);
+  }, [
+    handleOpenInEditor,
+    handleUnavailable,
+    line,
+    onOpenInPanel,
+    threadRef,
+    workspaceRelativePath,
+  ]);
 
   const handleOpenInBrowser = useCallback(() => {
+    if (outsideWorkspace) {
+      handleUnavailable();
+      return;
+    }
     if (!onOpenInBrowser) {
       return;
     }
@@ -1301,7 +1356,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
         );
       }
     })();
-  }, [onOpenInBrowser, targetPath]);
+  }, [handleUnavailable, onOpenInBrowser, outsideWorkspace, targetPath]);
 
   const handleCopy = useCallback(
     (value: string, title: string) => {
@@ -1399,15 +1454,26 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              if (shouldOpenMarkdownFileLinkInEditor(event)) {
-                handleOpenInEditor();
-                return;
+              const action = resolveMarkdownFileLinkPrimaryAction({
+                workspaceRelativePath,
+                openInEditor: shouldOpenMarkdownFileLinkInEditor(event),
+                hasBrowserPreview: onOpenInBrowser !== undefined,
+                browserFirst: shouldOpenMarkdownFileLinkInBrowserByDefault(iconPath),
+              });
+              switch (action) {
+                case "unavailable":
+                  handleUnavailable();
+                  return;
+                case "editor":
+                  handleOpenInEditor();
+                  return;
+                case "browser":
+                  handleOpenInBrowser();
+                  return;
+                case "preview":
+                  handleOpenInFilePreview();
+                  return;
               }
-              if (onOpenInBrowser && shouldOpenMarkdownFileLinkInBrowserByDefault(iconPath)) {
-                handleOpenInBrowser();
-                return;
-              }
-              handleOpenInFilePreview();
             }}
             onContextMenu={handleContextMenu}
           >

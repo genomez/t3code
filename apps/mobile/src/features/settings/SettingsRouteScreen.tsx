@@ -47,6 +47,7 @@ import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
 import { resolveAgentAwarenessPlatformPresentation } from "./SettingsRouteScreen.logic";
+import { BackgroundConnectionSettingsSection } from "../background-connection/BackgroundConnectionSettingsSection";
 
 type NotificationStatus = "checking" | "enabled" | "disabled" | "unsupported";
 type LiveActivityStatus = "checking" | "enabled" | "disabled" | "signed-out" | "linking";
@@ -127,6 +128,8 @@ function LocalSettingsRouteScreen() {
 
         <GeneralSettingsSection />
 
+        <BackgroundConnectionSettingsSection />
+
         <SettingsSection title="Appearance">
           <SettingsRow icon="paintbrush" label="Appearance" target="SettingsAppearance" />
         </SettingsSection>
@@ -146,6 +149,7 @@ function ConfiguredSettingsRouteScreen() {
   const savePreferences = useAtomSet(updateMobilePreferencesAtom);
   const agentAwarenessPushAvailable = supportsAgentAwarenessPush();
   const agentAwarenessPlatform = resolveAgentAwarenessPlatformPresentation(Platform.OS);
+  const androidLocalNotifications = Platform.OS === "android";
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { getToken, isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
@@ -167,7 +171,7 @@ function ConfiguredSettingsRouteScreen() {
   }, [isLoaded, isSignedIn, user?.primaryEmailAddress?.emailAddress]);
 
   const refreshNotifications = useCallback(async () => {
-    if (process.env.EXPO_OS !== "ios") {
+    if (Platform.OS !== "ios" && Platform.OS !== "android") {
       setNotificationStatus("unsupported");
       return;
     }
@@ -212,7 +216,9 @@ function ConfiguredSettingsRouteScreen() {
       runtime.runPromiseExit(
         requestAgentNotificationPermission.pipe(
           Effect.tap((permission) =>
-            permission.type === "granted" ? refreshAgentAwarenessRegistration() : Effect.void,
+            permission.type === "granted" && Platform.OS === "ios"
+              ? refreshAgentAwarenessRegistration()
+              : Effect.void,
           ),
         ),
       ),
@@ -229,6 +235,13 @@ function ConfiguredSettingsRouteScreen() {
     }
     if (result.value.type === "granted") {
       setNotificationStatus("enabled");
+      if (androidLocalNotifications) {
+        Alert.alert(
+          "Notifications enabled",
+          "T3 will notify this phone when a background agent finishes or fails.",
+        );
+        return;
+      }
       // Permission alone is not enough: the switch stays off until the relay
       // registration succeeds, so tell the user the truth about which happened.
       if (getAgentAwarenessRegistrationStatus() === "registered") {
@@ -246,10 +259,7 @@ function ConfiguredSettingsRouteScreen() {
     }
     if (result.value.type === "unsupported") {
       setNotificationStatus("unsupported");
-      Alert.alert(
-        "Notifications unavailable",
-        "Live Activity notifications are only available on iOS.",
-      );
+      Alert.alert("Notifications unavailable", "Notifications are not available on this platform.");
       return;
     }
     setNotificationStatus("disabled");
@@ -265,7 +275,7 @@ function ConfiguredSettingsRouteScreen() {
         { text: "Open Settings", onPress: () => void Linking.openSettings() },
       ],
     );
-  }, []);
+  }, [androidLocalNotifications]);
 
   const promptSignIn = useCallback(() => {
     Alert.alert(
@@ -364,14 +374,14 @@ function ConfiguredSettingsRouteScreen() {
 
       Alert.alert(
         "Disable notifications",
-        "Notification permission is controlled by iOS. Open Settings to disable notifications for T3 Code.",
+        `Notification permission is controlled by ${androidLocalNotifications ? "Android" : "iOS"}. Open Settings to disable notifications for T3 Code.`,
         [
           { text: "Cancel", style: "cancel" },
           { text: "Open Settings", onPress: () => void Linking.openSettings() },
         ],
       );
     },
-    [requestNotifications],
+    [androidLocalNotifications, requestNotifications],
   );
 
   const handleLiveActivitiesChange = useCallback(
@@ -475,17 +485,21 @@ function ConfiguredSettingsRouteScreen() {
             icon="bell.badge"
             label="Device Notifications"
             disabled={
-              !agentAwarenessPlatform.supported ||
-              !agentAwarenessPushAvailable ||
+              (!androidLocalNotifications &&
+                (!agentAwarenessPlatform.supported || !agentAwarenessPushAvailable)) ||
               notificationStatus === "checking" ||
               notificationStatus === "unsupported"
             }
-            subtitle={agentAwarenessPlatform.subtitle}
+            subtitle={androidLocalNotifications ? undefined : agentAwarenessPlatform.subtitle}
             // Only reads as on when this device is actually registered with the
             // relay; otherwise notifications cannot be delivered regardless of
             // the local iOS permission.
             value={
-              agentAwarenessPushAvailable && notificationStatus === "enabled" && deviceRegistered
+              androidLocalNotifications
+                ? notificationStatus === "enabled"
+                : agentAwarenessPushAvailable &&
+                  notificationStatus === "enabled" &&
+                  deviceRegistered
             }
             onValueChange={handleDeviceNotificationsChange}
           />
@@ -512,6 +526,8 @@ function ConfiguredSettingsRouteScreen() {
         </SettingsSection>
 
         <GeneralSettingsSection />
+
+        <BackgroundConnectionSettingsSection />
 
         <SettingsSection title="Appearance">
           <SettingsRow icon="paintbrush" label="Appearance" target="SettingsAppearance" />

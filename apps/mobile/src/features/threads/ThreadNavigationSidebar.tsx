@@ -34,6 +34,10 @@ import { mobilePreferencesAtom } from "../../state/preferences";
 import { useThreadSearch } from "../../state/queries";
 import { useThreadListV2Enabled } from "./use-thread-list-v2-enabled";
 import { useThreadListV2ShelfPreferences } from "./use-thread-list-v2-shelf-preferences";
+import {
+  completionAttentionSessionStartedAt,
+  hasUnseenThreadCompletion,
+} from "./threadCompletionAttention";
 import { environmentServerConfigsAtom } from "../../state/server";
 import { usePendingNewTasks } from "../../state/use-pending-new-tasks";
 import { useWorkspaceState } from "../../state/workspace";
@@ -174,6 +178,18 @@ function ThreadNavigationSidebarPane(
   } = useThreadListActions();
   const threadListV2Enabled = useThreadListV2Enabled();
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
+  const completionAttentionState = useMemo(() => {
+    const preferences = AsyncResult.isSuccess(preferencesResult) ? preferencesResult.value : {};
+    return {
+      completionAttentionStartedAt:
+        preferences.completionAttentionStartedAt ?? completionAttentionSessionStartedAt,
+      threadLastVisitedAtById: preferences.threadLastVisitedAtById,
+    };
+  }, [preferencesResult]);
+  const threadHasUnseenCompletion = useCallback(
+    (thread: EnvironmentThreadShell) => hasUnseenThreadCompletion(thread, completionAttentionState),
+    [completionAttentionState],
+  );
   const autoSettleOnMerge =
     !AsyncResult.isSuccess(preferencesResult) ||
     preferencesResult.value.autoSettleOnMerge !== false;
@@ -773,6 +789,7 @@ function ThreadNavigationSidebarPane(
   // favicon and fallback title it was first rendered with.
   const listExtraData = useMemo(
     () => ({
+      completionAttentionState,
       selectedThreadKey: props.selectedThreadKey ?? "",
       projectByKey,
       projectCwdByKey,
@@ -783,6 +800,7 @@ function ThreadNavigationSidebarPane(
       threadSearchMatchByKey,
     }),
     [
+      completionAttentionState,
       props.selectedThreadKey,
       projectByKey,
       projectCwdByKey,
@@ -887,6 +905,7 @@ function ThreadNavigationSidebarPane(
           return (
             <ThreadListV2Row
               thread={thread}
+              hasUnseenCompletion={threadHasUnseenCompletion(thread)}
               variant={item.item.variant}
               snoozed={item.item.snoozed}
               pinned={item.item.pinned}
@@ -1023,6 +1042,7 @@ function ThreadNavigationSidebarPane(
             <ThreadListRow
               variant="sidebar"
               thread={thread}
+              hasUnseenCompletion={threadHasUnseenCompletion(thread)}
               environmentLabel={
                 savedConnectionsById[thread.environmentId]?.environmentLabel ?? null
               }
@@ -1091,6 +1111,7 @@ function ThreadNavigationSidebarPane(
       serverConfigs,
       shelfPreferencesLoaded,
       threadSearchMatchByKey,
+      threadHasUnseenCompletion,
       titleRegenerationEnvironmentIds,
       settleThread,
       settlementEnvironmentIds,
