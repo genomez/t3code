@@ -1,0 +1,133 @@
+diff --git a/dist/ImageViewing.js b/dist/ImageViewing.js
+index 3d7641a9a..20646ed6d 100644
+--- a/dist/ImageViewing.js
++++ b/dist/ImageViewing.js
+@@ -6,7 +6,7 @@
+  *
+  */
+ import React, { useCallback, useRef, useEffect } from "react";
+-import { Animated, Dimensions, StyleSheet, View, VirtualizedList, Modal, } from "react-native";
++import { Animated, Dimensions, Platform, StyleSheet, useWindowDimensions, View, VirtualizedList, Modal, } from "react-native";
+ import ImageItem from "./components/ImageItem/ImageItem";
+ import ImageDefaultHeader from "./components/ImageDefaultHeader";
+ import StatusBarManager from "./components/StatusBarManager";
+@@ -16,12 +16,14 @@ import useRequestClose from "./hooks/useRequestClose";
+ const DEFAULT_ANIMATION_TYPE = "fade";
+ const DEFAULT_BG_COLOR = "#000";
+ const DEFAULT_DELAY_LONG_PRESS = 800;
+-const SCREEN = Dimensions.get("screen");
+-const SCREEN_WIDTH = SCREEN.width;
++const STATIC_SCREEN = Dimensions.get("screen");
+ function ImageViewing({ images, keyExtractor, imageIndex, visible, onRequestClose, onLongPress = () => { }, onImageIndexChange, animationType = DEFAULT_ANIMATION_TYPE, backgroundColor = DEFAULT_BG_COLOR, presentationStyle, swipeToCloseEnabled, doubleTapToZoomEnabled, delayLongPress = DEFAULT_DELAY_LONG_PRESS, HeaderComponent, FooterComponent, }) {
++    const windowDimensions = useWindowDimensions();
++    const screen = Platform.OS === "android" ? windowDimensions : STATIC_SCREEN;
++    const screenWidth = screen.width;
+     const imageList = useRef(null);
+     const [opacity, onRequestCloseEnhanced] = useRequestClose(onRequestClose);
+-    const [currentImageIndex, onScroll] = useImageIndexChange(imageIndex, SCREEN);
++    const [currentImageIndex, onScroll] = useImageIndexChange(imageIndex, screen);
+     const [headerTransform, footerTransform, toggleBarsVisible] = useAnimatedComponents();
+     useEffect(() => {
+         if (onImageIndexChange) {
+@@ -46,10 +48,10 @@ function ImageViewing({ images, keyExtractor, imageIndex, visible, onRequestClos
+     })) : (<ImageDefaultHeader onRequestClose={onRequestCloseEnhanced}/>)}
+         </Animated.View>
+         <VirtualizedList ref={imageList} data={images} horizontal pagingEnabled windowSize={2} initialNumToRender={1} maxToRenderPerBatch={1} showsHorizontalScrollIndicator={false} showsVerticalScrollIndicator={false} initialScrollIndex={imageIndex} getItem={(_, index) => images[index]} getItemCount={() => images.length} getItemLayout={(_, index) => ({
+-        length: SCREEN_WIDTH,
+-        offset: SCREEN_WIDTH * index,
++        length: screenWidth,
++        offset: screenWidth * index,
+         index,
+-    })} renderItem={({ item: imageSrc }) => (<ImageItem onZoom={onZoom} imageSrc={imageSrc} onRequestClose={onRequestCloseEnhanced} onLongPress={onLongPress} delayLongPress={delayLongPress} swipeToCloseEnabled={swipeToCloseEnabled} doubleTapToZoomEnabled={doubleTapToZoomEnabled}/>)} onMomentumScrollEnd={onScroll} 
++    })} renderItem={({ item: imageSrc }) => (<ImageItem screen={screen} onZoom={onZoom} imageSrc={imageSrc} onRequestClose={onRequestCloseEnhanced} onLongPress={onLongPress} delayLongPress={delayLongPress} swipeToCloseEnabled={swipeToCloseEnabled} doubleTapToZoomEnabled={doubleTapToZoomEnabled}/>)} onMomentumScrollEnd={onScroll} 
+     //@ts-ignore
+     keyExtractor={(imageSrc, index) => keyExtractor
+         ? keyExtractor(imageSrc, index)
+@@ -82,5 +84,11 @@ const styles = StyleSheet.create({
+         bottom: 0,
+     },
+ });
+-const EnhancedImageViewing = (props) => (<ImageViewing key={props.imageIndex} {...props}/>);
++const EnhancedImageViewing = (props) => {
++    const windowDimensions = useWindowDimensions();
++    const dimensionKey = Platform.OS === "android"
++        ? `${windowDimensions.width}:${windowDimensions.height}`
++        : "static";
++    return <ImageViewing key={`${props.imageIndex}:${dimensionKey}`} {...props}/>;
++};
+ export default EnhancedImageViewing;
+diff --git a/dist/components/ImageItem/ImageItem.android.js b/dist/components/ImageItem/ImageItem.android.js
+index 5fcaa9f9a..63a694d82 100644
+--- a/dist/components/ImageItem/ImageItem.android.js
++++ b/dist/components/ImageItem/ImageItem.android.js
+@@ -6,20 +6,17 @@
+  *
+  */
+ import React, { useCallback, useRef, useState } from "react";
+-import { Animated, ScrollView, Dimensions, StyleSheet, } from "react-native";
++import { Animated, ScrollView, } from "react-native";
+ import useImageDimensions from "../../hooks/useImageDimensions";
+ import usePanResponder from "../../hooks/usePanResponder";
+ import { getImageStyles, getImageTransform } from "../../utils";
+ import { ImageLoading } from "./ImageLoading";
+ const SWIPE_CLOSE_OFFSET = 75;
+ const SWIPE_CLOSE_VELOCITY = 1.75;
+-const SCREEN = Dimensions.get("window");
+-const SCREEN_WIDTH = SCREEN.width;
+-const SCREEN_HEIGHT = SCREEN.height;
+-const ImageItem = ({ imageSrc, onZoom, onRequestClose, onLongPress, delayLongPress, swipeToCloseEnabled = true, doubleTapToZoomEnabled = true, }) => {
++const ImageItem = ({ screen, imageSrc, onZoom, onRequestClose, onLongPress, delayLongPress, swipeToCloseEnabled = true, doubleTapToZoomEnabled = true, }) => {
+     const imageContainer = useRef(null);
+     const imageDimensions = useImageDimensions(imageSrc);
+-    const [translate, scale] = getImageTransform(imageDimensions, SCREEN);
++    const [translate, scale] = getImageTransform(imageDimensions, screen);
+     const scrollValueY = new Animated.Value(0);
+     const [isLoaded, setLoadEnd] = useState(false);
+     const onLoaded = useCallback(() => setLoadEnd(true), []);
+@@ -55,7 +52,7 @@ const ImageItem = ({ imageSrc, onZoom, onRequestClose, onLongPress, delayLongPre
+         const offsetY = (_f = (_e = (_d = nativeEvent) === null || _d === void 0 ? void 0 : _d.contentOffset) === null || _e === void 0 ? void 0 : _e.y, (_f !== null && _f !== void 0 ? _f : 0));
+         if ((Math.abs(velocityY) > SWIPE_CLOSE_VELOCITY &&
+             offsetY > SWIPE_CLOSE_OFFSET) ||
+-            offsetY > SCREEN_HEIGHT / 2) {
++            offsetY > screen.height / 2) {
+             onRequestClose();
+         }
+     };
+@@ -64,7 +61,7 @@ const ImageItem = ({ imageSrc, onZoom, onRequestClose, onLongPress, delayLongPre
+         const offsetY = (_c = (_b = (_a = nativeEvent) === null || _a === void 0 ? void 0 : _a.contentOffset) === null || _b === void 0 ? void 0 : _b.y, (_c !== null && _c !== void 0 ? _c : 0));
+         scrollValueY.setValue(offsetY);
+     };
+-    return (<ScrollView ref={imageContainer} style={styles.listItem} pagingEnabled nestedScrollEnabled showsHorizontalScrollIndicator={false} showsVerticalScrollIndicator={false} contentContainerStyle={styles.imageScrollContainer} scrollEnabled={swipeToCloseEnabled} {...(swipeToCloseEnabled && {
++    return (<ScrollView ref={imageContainer} style={{ width: screen.width, height: screen.height }} pagingEnabled nestedScrollEnabled showsHorizontalScrollIndicator={false} showsVerticalScrollIndicator={false} contentContainerStyle={{ height: screen.height * 2 }} scrollEnabled={swipeToCloseEnabled} {...(swipeToCloseEnabled && {
+         onScroll,
+         onScrollEndDrag,
+     })}>
+@@ -72,13 +69,4 @@ const ImageItem = ({ imageSrc, onZoom, onRequestClose, onLongPress, delayLongPre
+       {(!isLoaded || !imageDimensions) && <ImageLoading />}
+     </ScrollView>);
+ };
+-const styles = StyleSheet.create({
+-    listItem: {
+-        width: SCREEN_WIDTH,
+-        height: SCREEN_HEIGHT,
+-    },
+-    imageScrollContainer: {
+-        height: SCREEN_HEIGHT * 2,
+-    },
+-});
+ export default React.memo(ImageItem);
+diff --git a/dist/components/ImageItem/ImageItem.android.d.ts b/dist/components/ImageItem/ImageItem.android.d.ts
+index 0b1aa96dc..4648dfafe 100644
+--- a/dist/components/ImageItem/ImageItem.android.d.ts
++++ b/dist/components/ImageItem/ImageItem.android.d.ts
+@@ -6,8 +6,9 @@
+  *
+  */
+ import React from "react";
+-import { ImageSource } from "../../@types";
++import { Dimensions, ImageSource } from "../../@types";
+ declare type Props = {
++    screen: Dimensions;
+     imageSrc: ImageSource;
+     onRequestClose: () => void;
+     onZoom: (isZoomed: boolean) => void;

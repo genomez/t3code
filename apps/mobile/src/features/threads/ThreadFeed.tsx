@@ -39,6 +39,7 @@ import {
   StyleSheet,
   Text as NativeText,
   type ColorValue,
+  type TextStyle,
   useWindowDimensions,
   View,
   type ViewStyle,
@@ -112,6 +113,13 @@ import { useMarkdownCodeHighlight } from "./markdownCodeHighlightState";
 import { useAssetUrl, useAssetUrlState } from "../../state/assets";
 import { MARKDOWN_IMAGE_MAX_WIDTH, resolveMarkdownImageDisplaySize } from "./markdownImageSize";
 import { resolveThreadMarkdownFileAction } from "./threadMarkdownFileAction";
+import {
+  createAndroidSelectableHeadingStyle,
+  createAndroidSelectableMarkdownRenderers,
+} from "./androidSelectableMarkdownRenderers";
+
+/** theme.spacing.s; Nitro Markdown draws the h1 rule this far below the text. */
+const MARKDOWN_HEADING_RULE_SPACING = 4;
 
 const WIDE_MARKDOWN_BLOCK_OPTIONS = {
   includeOrderedLists: Platform.OS === "android",
@@ -632,7 +640,7 @@ function useMarkdownStyles(
       },
       spacing: {
         xs: 4,
-        s: 4,
+        s: MARKDOWN_HEADING_RULE_SPACING,
         m: 8,
         l: 8,
         xl: 16,
@@ -700,6 +708,9 @@ function useMarkdownStyles(
     };
 
     const createMarkdownRenderers = (
+      bodyTextColor: string,
+      headingStyle: TextStyle | undefined,
+      headingBorderColor: string,
       inlineTextColor: string,
       inlineCodeTextColor: string,
       blockBackgroundColor: string,
@@ -708,6 +719,33 @@ function useMarkdownStyles(
       preserveSoftBreaks: boolean,
       highlightCode: boolean,
     ): CustomRenderers => ({
+      ...(Platform.OS === "android"
+        ? createAndroidSelectableMarkdownRenderers({
+            paragraph: {
+              color: bodyTextColor,
+              fontFamily: regularFontFamily,
+              fontSize: markdownFontSizes.m,
+              lineHeight: markdownFontSizes.bodyLineHeight,
+              includeFontPadding: false,
+              width: "100%",
+              maxWidth: "100%",
+              marginBottom: preserveSoftBreaks ? 0 : 10,
+            },
+            listItemText: {
+              color: bodyTextColor,
+              fontFamily: regularFontFamily,
+              fontSize: markdownFontSizes.m,
+              lineHeight: markdownFontSizes.bodyLineHeight,
+              includeFontPadding: false,
+            },
+            heading: createAndroidSelectableHeadingStyle({
+              fontSizes: markdownFontSizes,
+              borderColor: headingBorderColor,
+              borderSpacing: MARKDOWN_HEADING_RULE_SPACING,
+              override: headingStyle,
+            }),
+          })
+        : {}),
       link: ({ children, href = "" }) => {
         const presentation = resolveMarkdownLinkPresentation(href);
         if (presentation.kind === "file") {
@@ -880,6 +918,9 @@ function useMarkdownStyles(
         theme: userTheme,
         styles: userStyles,
         renderers: createMarkdownRenderers(
+          markdownUserBodyColor,
+          userStyles.heading,
+          markdownUserFenceBg,
           markdownUserCodeText,
           markdownUserInlineCodeText,
           markdownUserFenceBg,
@@ -913,6 +954,9 @@ function useMarkdownStyles(
         theme: assistantTheme,
         styles: assistantStyles,
         renderers: createMarkdownRenderers(
+          markdownBodyColor,
+          assistantStyles.heading,
+          markdownCodeBg,
           markdownCodeText,
           markdownInlineCodeText,
           markdownCodeBg,
