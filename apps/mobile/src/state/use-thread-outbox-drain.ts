@@ -357,6 +357,7 @@ function drainOnce(state: ThreadOutboxDrainState): void {
       environmentConnected:
         presentations.get(nextQueuedMessage.environmentId)?.connection.phase === "connected",
       threadBusy: thread?.session?.status === "running" || thread?.session?.status === "starting",
+      deferWhileBusy: nextQueuedMessage.deferWhileBusy,
     });
     if (deliveryAction === "wait") {
       continue;
@@ -412,7 +413,12 @@ function drainOnce(state: ThreadOutboxDrainState): void {
       );
       const freshThreadBusy =
         freshThread?.session?.status === "running" || freshThread?.session?.status === "starting";
-      if (deliveryAction === "send" && creation === undefined && freshThreadBusy) {
+      if (
+        deliveryAction === "send" &&
+        creation === undefined &&
+        nextQueuedMessage.deferWhileBusy === true &&
+        freshThreadBusy
+      ) {
         return true;
       }
       return deliveryAction === "remove"

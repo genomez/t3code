@@ -23,5 +23,10 @@
         <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
       </intent-filter>
     </receiver>
+
+    <receiver
+      android:name="expo.modules.t3backgroundconnection.T3AgentReplyReceiver"
+      android:enabled="true"
+      android:exported="false" />
   </application>
 </manifest>

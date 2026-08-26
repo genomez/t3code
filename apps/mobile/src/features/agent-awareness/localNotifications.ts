@@ -86,6 +86,8 @@ export async function scheduleAndroidAgentCompletionNotification(input: {
       notificationText.title,
       notificationText.body,
       deepLinks.nativeUri,
+      input.environmentId,
+      input.thread.id,
     )
   ) {
     return;
