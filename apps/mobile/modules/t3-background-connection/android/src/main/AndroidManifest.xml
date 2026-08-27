@@ -8,6 +8,10 @@
   <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
 
   <application>
+    <meta-data
+      android:name="com.google.android.gms.car.application"
+      android:resource="@xml/automotive_app_desc" />
+
     <service
       android:name="expo.modules.t3backgroundconnection.T3BackgroundConnectionService"
       android:exported="false"

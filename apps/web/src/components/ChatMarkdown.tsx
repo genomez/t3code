@@ -1604,27 +1604,27 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
                 MARKDOWN_FILE_LINK_CLASS_NAME,
                 className,
               )}
-               data-markdown-copy={copyMarkdown}
-               onClick={(event) => {
-                 event.preventDefault();
-                 event.stopPropagation();
-                 const action = resolveMarkdownFileLinkPrimaryAction({
-                   workspaceRelativePath,
-                   openInEditor: onOpen !== undefined && shouldOpenMarkdownFileLinkInEditor(event),
-                   hasBrowserPreview: canOpenInBrowser,
-                   browserFirst: useBrowserPrimaryAction,
-                 });
-                 if (action === "unavailable") {
-                   handleUnavailable();
-                   return;
-                 }
-                 if (action === "editor") {
-                   handleOpenInEditor();
-                   return;
-                 }
-                 if (action === "browser") {
-                   handleOpenInBrowser();
-                   return;
+              data-markdown-copy={copyMarkdown}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                const action = resolveMarkdownFileLinkPrimaryAction({
+                  workspaceRelativePath,
+                  openInEditor: onOpen !== undefined && shouldOpenMarkdownFileLinkInEditor(event),
+                  hasBrowserPreview: canOpenInBrowser,
+                  browserFirst: useBrowserPrimaryAction,
+                });
+                if (action === "unavailable") {
+                  handleUnavailable();
+                  return;
+                }
+                if (action === "editor") {
+                  handleOpenInEditor();
+                  return;
+                }
+                if (action === "browser") {
+                  handleOpenInBrowser();
+                  return;
                 }
                 handleOpenInFilePreview();
               }}
@@ -1642,10 +1642,10 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
                 MARKDOWN_FILE_LINK_CLASS_NAME,
                 "select-text",
                 className,
-               )}
-               data-markdown-copy={copyMarkdown}
-               onClick={outsideWorkspace ? handleUnavailable : handleContextMenu}
-               onContextMenu={handleContextMenu}
+              )}
+              data-markdown-copy={copyMarkdown}
+              onClick={outsideWorkspace ? handleUnavailable : handleContextMenu}
+              onContextMenu={handleContextMenu}
             >
               <FileTagChipContent path={iconPath} label={label} theme={theme} selectable />
             </button>

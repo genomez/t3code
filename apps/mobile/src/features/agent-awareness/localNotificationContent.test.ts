@@ -5,6 +5,7 @@ import {
   buildAndroidAgentNotificationText,
   deriveLatestAssistantResponsePreview,
   stripMarkdownLinkDestinations,
+  truncateAgentResponsePreview,
 } from "./localNotificationContent";
 
 const runningTurn = {
@@ -71,8 +72,20 @@ describe("local agent notification content", () => {
       }),
     );
     expect(preview).not.toBeNull();
-    expect(preview!.length).toBe(ANDROID_AGENT_RESPONSE_PREVIEW_MAX_LENGTH);
-    expect(preview!.endsWith("…")).toBe(true);
+    expect(preview!.length).toBeLessThanOrEqual(ANDROID_AGENT_RESPONSE_PREVIEW_MAX_LENGTH);
+    expect(preview).toContain("…");
+  });
+
+  it("preserves an actionable final sentence in a long response", () => {
+    const text =
+      "Excellent—that confirms voice input is working correctly. " +
+      "This intentionally long explanation provides enough detail to exceed the notification limit and would previously hide the final instruction from view. " +
+      "Use the microphone button to send your next reply.";
+
+    const preview = truncateAgentResponsePreview(text);
+    expect(preview).toContain("Excellent—that confirms");
+    expect(preview).toContain("Use the microphone button");
+    expect(preview.length).toBeLessThanOrEqual(ANDROID_AGENT_RESPONSE_PREVIEW_MAX_LENGTH);
   });
 
   it("keeps Markdown link labels without exposing raw local destinations", () => {
@@ -110,6 +123,28 @@ describe("local agent notification content", () => {
       title: "Updated thread title",
       body: "Agent finished — The current answer is ready.",
     });
+  });
+
+  it("keeps the complete status and final instruction inside the native body limit", () => {
+    const result = buildAndroidAgentNotificationText(
+      thread({
+        messages: [
+          {
+            id: "assistant-2" as never,
+            role: "assistant" as const,
+            text:
+              "The reply route is working. " +
+              "This extended explanation contains background detail that is less useful while driving and is deliberately long enough to require a compact preview. " +
+              "Say your next request after the tone.",
+            turnId: "turn-2" as never,
+          },
+        ],
+      }),
+    );
+
+    expect(result.body).toMatch(/^Agent finished — The reply route is working/);
+    expect(result.body).toContain("Say your next request after the tone.");
+    expect(result.body.length).toBeLessThanOrEqual(ANDROID_AGENT_RESPONSE_PREVIEW_MAX_LENGTH);
   });
 
   it("keeps a useful failure notification when no response text exists", () => {

@@ -1,20 +1,37 @@
 package expo.modules.t3backgroundconnection
 
-import android.app.RemoteInput
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import androidx.core.app.RemoteInput
 
 class T3AgentReplyReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent) {
-    if (intent.action != ACTION_REPLY) return
-
     val applicationContext = context.applicationContext
     val tag = intent.getStringExtra(EXTRA_NOTIFICATION_TAG)
-    val title = intent.getStringExtra(EXTRA_NOTIFICATION_TITLE)
-    val deepLink = intent.getStringExtra(EXTRA_DEEP_LINK)
+    if (intent.action == ACTION_DISMISS) {
+      tag?.takeIf(T3BackgroundConnectionService::isAgentNotificationTag)?.let { validTag ->
+        T3BackgroundConnectionService.dismissAgentNotification(applicationContext, validTag)
+      }
+      return
+    }
+
     val environmentId = intent.getStringExtra(EXTRA_ENVIRONMENT_ID)
     val threadId = intent.getStringExtra(EXTRA_THREAD_ID)
+    if (intent.action == ACTION_MARK_AS_READ) {
+      if (
+        T3BackgroundConnectionService.isAgentNotificationTag(tag) &&
+        T3AgentReplyPolicy.isValidIdentity(environmentId) &&
+        T3AgentReplyPolicy.isValidIdentity(threadId)
+      ) {
+        T3BackgroundConnectionService.dismissAgentNotification(applicationContext, checkNotNull(tag))
+      }
+      return
+    }
+    if (intent.action != ACTION_REPLY) return
+
+    val title = intent.getStringExtra(EXTRA_NOTIFICATION_TITLE)
+    val deepLink = intent.getStringExtra(EXTRA_DEEP_LINK)
     val text = T3AgentReplyPolicy.normalizeText(
       RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY_TEXT_REPLY),
     )
@@ -63,8 +80,11 @@ class T3AgentReplyReceiver : BroadcastReceiver() {
       applicationContext,
       validTag,
       validTitle,
-      "Reply queued in T3 Code",
+      T3AgentNotificationPolicy.REPLY_QUEUED_BODY,
       validDeepLink,
+      T3AgentNotificationPolicy.replyAcknowledgementTimeoutMs(
+        T3AgentNotificationPolicy.REPLY_QUEUED_BODY,
+      ),
     )
     T3BackgroundConnectionState.initialize(applicationContext)
     T3BackgroundConnectionState.emitAgentReplyAvailable()
@@ -74,6 +94,10 @@ class T3AgentReplyReceiver : BroadcastReceiver() {
   companion object {
     const val ACTION_REPLY =
       "expo.modules.t3backgroundconnection.action.REPLY_TO_AGENT"
+    const val ACTION_MARK_AS_READ =
+      "expo.modules.t3backgroundconnection.action.MARK_AGENT_RESPONSE_READ"
+    const val ACTION_DISMISS =
+      "expo.modules.t3backgroundconnection.action.DISMISS_AGENT_NOTIFICATION"
     const val KEY_TEXT_REPLY = "t3_agent_reply_text"
     const val EXTRA_NOTIFICATION_TAG = "notificationTag"
     const val EXTRA_NOTIFICATION_TITLE = "notificationTitle"

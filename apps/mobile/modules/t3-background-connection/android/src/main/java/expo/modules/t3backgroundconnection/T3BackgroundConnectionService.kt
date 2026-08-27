@@ -5,7 +5,6 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.app.RemoteInput
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -13,6 +12,9 @@ import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
+import androidx.core.app.NotificationCompat
+import androidx.core.app.Person
+import androidx.core.app.RemoteInput
 import com.facebook.react.HeadlessJsTaskService
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.jstasks.HeadlessJsTaskConfig
@@ -137,13 +139,24 @@ class T3BackgroundConnectionService : HeadlessJsTaskService() {
         environmentId,
         threadId,
       )
+      val markAsReadAction = buildAgentMarkAsReadAction(
+        applicationContext,
+        tag,
+        notificationUri,
+        environmentId,
+        threadId,
+      )
+      val deleteIntent = buildAgentDeleteIntent(applicationContext, tag)
       val notification = buildAgentNotification(
         applicationContext,
         title,
         body,
         contentIntent,
         replyAction,
+        markAsReadAction,
+        deleteIntent,
         isSummary = false,
+        isAutomotiveMessage = true,
       )
       val manager = applicationContext.getSystemService(NotificationManager::class.java)
       manager.notify(tag, 0, notification)
@@ -156,7 +169,10 @@ class T3BackgroundConnectionService : HeadlessJsTaskService() {
           body,
           contentIntent,
           replyAction = null,
+          markAsReadAction = null,
+          deleteIntent = null,
           isSummary = true,
+          isAutomotiveMessage = false,
         ),
       )
     }
@@ -167,6 +183,7 @@ class T3BackgroundConnectionService : HeadlessJsTaskService() {
       title: String,
       body: String,
       deepLink: String?,
+      timeoutAfterMs: Long? = null,
     ) {
       val applicationContext = context.applicationContext
       createAgentNotificationChannel(applicationContext)
@@ -180,7 +197,11 @@ class T3BackgroundConnectionService : HeadlessJsTaskService() {
           body,
           agentContentIntent(applicationContext, tag, notificationUri),
           replyAction = null,
+          markAsReadAction = null,
+          deleteIntent = buildAgentDeleteIntent(applicationContext, tag),
           isSummary = false,
+          isAutomotiveMessage = false,
+          timeoutAfterMs = timeoutAfterMs,
         ),
       )
     }
@@ -242,40 +263,52 @@ class T3BackgroundConnectionService : HeadlessJsTaskService() {
       title: String,
       body: String,
       contentIntent: PendingIntent,
-      replyAction: Notification.Action?,
+      replyAction: NotificationCompat.Action?,
+      markAsReadAction: NotificationCompat.Action?,
+      deleteIntent: PendingIntent?,
       isSummary: Boolean,
+      isAutomotiveMessage: Boolean,
+      timeoutAfterMs: Long? = null,
     ): Notification {
       val smallIcon =
         context.resources.getIdentifier("notification_icon", "drawable", context.packageName)
           .takeIf { it != 0 }
           ?: android.R.drawable.stat_notify_sync_noanim
-      return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        Notification.Builder(context, AGENT_NOTIFICATION_CHANNEL_ID)
-      } else {
-        @Suppress("DEPRECATION")
-        Notification.Builder(context)
-      }.apply {
-        setContentTitle(normalizeNotificationTitle(title))
-        setContentText(normalizeNotificationText(body))
-        setStyle(Notification.BigTextStyle().bigText(normalizeNotificationText(body)))
+      val normalizedTitle = normalizeNotificationTitle(title)
+      val normalizedBody = normalizeNotificationText(body)
+      return NotificationCompat.Builder(context, AGENT_NOTIFICATION_CHANNEL_ID).apply {
+        setContentTitle(normalizedTitle)
+        setContentText(normalizedBody)
         setSmallIcon(smallIcon)
         setColor(0xff7565c7.toInt())
-        setAutoCancel(true)
+        setAutoCancel(!isSummary)
         setOnlyAlertOnce(true)
         setShowWhen(true)
         setGroup(AGENT_NOTIFICATION_GROUP)
         setContentIntent(contentIntent)
+        deleteIntent?.let(::setDeleteIntent)
         replyAction?.let(::addAction)
+        markAsReadAction?.let(::addInvisibleAction)
+        timeoutAfterMs?.let(::setTimeoutAfter)
+        if (isAutomotiveMessage) {
+          val deviceUser = Person.Builder().setName("You").build()
+          val agent = Person.Builder().setName("T3 agent").build()
+          setCategory(NotificationCompat.CATEGORY_MESSAGE)
+          setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+          setStyle(
+            NotificationCompat.MessagingStyle(deviceUser)
+              .setConversationTitle(normalizedTitle)
+              .setGroupConversation(true)
+              .addMessage(normalizedBody, System.currentTimeMillis(), agent),
+          )
+        } else {
+          setStyle(NotificationCompat.BigTextStyle().bigText(normalizedBody))
+        }
         if (isSummary) {
           setGroupSummary(true)
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            setGroupAlertBehavior(Notification.GROUP_ALERT_CHILDREN)
-          }
+          setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN)
         }
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-          @Suppress("DEPRECATION")
-          setPriority(Notification.PRIORITY_HIGH)
-        }
+        setPriority(NotificationCompat.PRIORITY_HIGH)
       }.build()
     }
 
@@ -303,7 +336,7 @@ class T3BackgroundConnectionService : HeadlessJsTaskService() {
       notificationUri: Uri,
       environmentId: String,
       threadId: String,
-    ): Notification.Action {
+    ): NotificationCompat.Action {
       val replyIntent = Intent(context, T3AgentReplyReceiver::class.java).apply {
         action = T3AgentReplyReceiver.ACTION_REPLY
         // Extras do not participate in PendingIntent identity. A private,
@@ -329,20 +362,71 @@ class T3BackgroundConnectionService : HeadlessJsTaskService() {
       val remoteInput = RemoteInput.Builder(T3AgentReplyReceiver.KEY_TEXT_REPLY)
         .setLabel("Reply to T3")
         .build()
-      return Notification.Action.Builder(
+      return NotificationCompat.Action.Builder(
         android.R.drawable.ic_menu_send,
         "Reply",
         replyPendingIntent,
       ).apply {
         addRemoteInput(remoteInput)
         setAllowGeneratedReplies(true)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-          setSemanticAction(Notification.Action.SEMANTIC_ACTION_REPLY)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-          setAuthenticationRequired(true)
-        }
+        setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
+        setShowsUserInterface(false)
+        setAuthenticationRequired(true)
       }.build()
+    }
+
+    private fun buildAgentMarkAsReadAction(
+      context: Context,
+      tag: String,
+      notificationUri: Uri,
+      environmentId: String,
+      threadId: String,
+    ): NotificationCompat.Action {
+      val markAsReadIntent = Intent(context, T3AgentReplyReceiver::class.java).apply {
+        action = T3AgentReplyReceiver.ACTION_MARK_AS_READ
+        data = Uri.Builder()
+          .scheme("t3-agent-read")
+          .authority(context.packageName)
+          .appendPath(environmentId)
+          .appendPath(threadId)
+          .build()
+        putExtra(T3AgentReplyReceiver.EXTRA_NOTIFICATION_TAG, tag)
+        putExtra(T3AgentReplyReceiver.EXTRA_DEEP_LINK, notificationUri.toString())
+        putExtra(T3AgentReplyReceiver.EXTRA_ENVIRONMENT_ID, environmentId)
+        putExtra(T3AgentReplyReceiver.EXTRA_THREAD_ID, threadId)
+      }
+      val pendingIntent = PendingIntent.getBroadcast(
+        context,
+        T3AgentReplyPolicy.requestCode(tag, environmentId, threadId),
+        markAsReadIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+      )
+      return NotificationCompat.Action.Builder(
+        android.R.drawable.ic_menu_view,
+        "Mark as read",
+        pendingIntent,
+      ).apply {
+        setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ)
+        setShowsUserInterface(false)
+      }.build()
+    }
+
+    private fun buildAgentDeleteIntent(context: Context, tag: String): PendingIntent {
+      val deleteIntent = Intent(context, T3AgentReplyReceiver::class.java).apply {
+        action = T3AgentReplyReceiver.ACTION_DISMISS
+        data = Uri.Builder()
+          .scheme("t3-agent-dismiss")
+          .authority(context.packageName)
+          .appendPath(tag)
+          .build()
+        putExtra(T3AgentReplyReceiver.EXTRA_NOTIFICATION_TAG, tag)
+      }
+      return PendingIntent.getBroadcast(
+        context,
+        tag.hashCode(),
+        deleteIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+      )
     }
 
     private fun buildNotification(context: Context, title: String?, text: String?): Notification {
