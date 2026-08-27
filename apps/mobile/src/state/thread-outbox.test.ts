@@ -92,6 +92,7 @@ describe("thread outbox", () => {
       },
       runtimeMode: "approval-required",
       interactionMode: "plan",
+      deferWhileBusy: true,
     } satisfies QueuedThreadMessage;
 
     expect(decodeQueuedThreadMessage(encodeQueuedThreadMessage(selectedMessage))).toEqual(
@@ -495,6 +496,7 @@ describe("thread outbox", () => {
         shellStatus: "live",
         environmentConnected: true,
         threadBusy: true,
+        deferWhileBusy: false,
       }),
     ).toBe("send");
     expect(
@@ -504,8 +506,32 @@ describe("thread outbox", () => {
         shellStatus: "live",
         environmentConnected: false,
         threadBusy: true,
+        deferWhileBusy: false,
       }),
     ).toBe("wait");
+  });
+
+  it("holds notification replies behind a newer active turn", () => {
+    expect(
+      resolveThreadOutboxDeliveryAction({
+        isCreation: false,
+        threadExists: true,
+        shellStatus: "live",
+        environmentConnected: true,
+        threadBusy: true,
+        deferWhileBusy: true,
+      }),
+    ).toBe("wait");
+    expect(
+      resolveThreadOutboxDeliveryAction({
+        isCreation: false,
+        threadExists: true,
+        shellStatus: "live",
+        environmentConnected: true,
+        threadBusy: false,
+        deferWhileBusy: true,
+      }),
+    ).toBe("send");
   });
 
   it("sends queued creations once connected and live, removing already-created ones", () => {

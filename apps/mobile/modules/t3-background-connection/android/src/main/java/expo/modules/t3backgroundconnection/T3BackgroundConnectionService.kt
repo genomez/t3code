@@ -5,6 +5,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.RemoteInput
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -112,6 +113,8 @@ class T3BackgroundConnectionService : HeadlessJsTaskService() {
       title: String,
       body: String,
       deepLink: String,
+      environmentId: String,
+      threadId: String,
     ) {
       val applicationContext = context.applicationContext
       createAgentNotificationChannel(applicationContext)
@@ -119,21 +122,27 @@ class T3BackgroundConnectionService : HeadlessJsTaskService() {
       require(notificationUri.isAbsolute) {
         "Agent notification deep links must be absolute URIs"
       }
-      val launchIntent = Intent(Intent.ACTION_VIEW, notificationUri).apply {
-        setPackage(applicationContext.packageName)
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+      require(T3AgentReplyPolicy.isValidIdentity(environmentId)) {
+        "Agent notification environment identifiers must be non-empty"
       }
-      val contentIntent = PendingIntent.getActivity(
+      require(T3AgentReplyPolicy.isValidIdentity(threadId)) {
+        "Agent notification thread identifiers must be non-empty"
+      }
+      val contentIntent = agentContentIntent(applicationContext, tag, notificationUri)
+      val replyAction = buildAgentReplyAction(
         applicationContext,
-        tag.hashCode(),
-        launchIntent,
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        tag,
+        title,
+        notificationUri,
+        environmentId,
+        threadId,
       )
       val notification = buildAgentNotification(
         applicationContext,
         title,
         body,
         contentIntent,
+        replyAction,
         isSummary = false,
       )
       val manager = applicationContext.getSystemService(NotificationManager::class.java)
@@ -146,10 +155,38 @@ class T3BackgroundConnectionService : HeadlessJsTaskService() {
           title,
           body,
           contentIntent,
+          replyAction = null,
           isSummary = true,
         ),
       )
     }
+
+    internal fun updateAgentNotificationAfterReply(
+      context: Context,
+      tag: String,
+      title: String,
+      body: String,
+      deepLink: String?,
+    ) {
+      val applicationContext = context.applicationContext
+      createAgentNotificationChannel(applicationContext)
+      val notificationUri = deepLink?.let(Uri::parse)?.takeIf { it.isAbsolute } ?: return
+      applicationContext.getSystemService(NotificationManager::class.java).notify(
+        tag,
+        0,
+        buildAgentNotification(
+          applicationContext,
+          title,
+          body,
+          agentContentIntent(applicationContext, tag, notificationUri),
+          replyAction = null,
+          isSummary = false,
+        ),
+      )
+    }
+
+    internal fun isAgentNotificationTag(tag: String?): Boolean =
+      tag?.startsWith(AGENT_NOTIFICATION_TAG_PREFIX) == true
 
     /** Remove a single completion alert and its summary only when empty. */
     internal fun dismissAgentNotification(context: Context, tag: String) {
@@ -205,6 +242,7 @@ class T3BackgroundConnectionService : HeadlessJsTaskService() {
       title: String,
       body: String,
       contentIntent: PendingIntent,
+      replyAction: Notification.Action?,
       isSummary: Boolean,
     ): Notification {
       val smallIcon =
@@ -227,6 +265,7 @@ class T3BackgroundConnectionService : HeadlessJsTaskService() {
         setShowWhen(true)
         setGroup(AGENT_NOTIFICATION_GROUP)
         setContentIntent(contentIntent)
+        replyAction?.let(::addAction)
         if (isSummary) {
           setGroupSummary(true)
           if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -236,6 +275,72 @@ class T3BackgroundConnectionService : HeadlessJsTaskService() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
           @Suppress("DEPRECATION")
           setPriority(Notification.PRIORITY_HIGH)
+        }
+      }.build()
+    }
+
+    private fun agentContentIntent(
+      context: Context,
+      tag: String,
+      notificationUri: Uri,
+    ): PendingIntent {
+      val launchIntent = Intent(Intent.ACTION_VIEW, notificationUri).apply {
+        setPackage(context.packageName)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+      }
+      return PendingIntent.getActivity(
+        context,
+        tag.hashCode(),
+        launchIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+      )
+    }
+
+    private fun buildAgentReplyAction(
+      context: Context,
+      tag: String,
+      title: String,
+      notificationUri: Uri,
+      environmentId: String,
+      threadId: String,
+    ): Notification.Action {
+      val replyIntent = Intent(context, T3AgentReplyReceiver::class.java).apply {
+        action = T3AgentReplyReceiver.ACTION_REPLY
+        // Extras do not participate in PendingIntent identity. A private,
+        // thread-specific data URI keeps simultaneous reply actions distinct.
+        data = Uri.Builder()
+          .scheme("t3-agent-reply")
+          .authority(context.packageName)
+          .appendPath(environmentId)
+          .appendPath(threadId)
+          .build()
+        putExtra(T3AgentReplyReceiver.EXTRA_NOTIFICATION_TAG, tag)
+        putExtra(T3AgentReplyReceiver.EXTRA_NOTIFICATION_TITLE, title)
+        putExtra(T3AgentReplyReceiver.EXTRA_DEEP_LINK, notificationUri.toString())
+        putExtra(T3AgentReplyReceiver.EXTRA_ENVIRONMENT_ID, environmentId)
+        putExtra(T3AgentReplyReceiver.EXTRA_THREAD_ID, threadId)
+      }
+      val replyPendingIntent = PendingIntent.getBroadcast(
+        context,
+        T3AgentReplyPolicy.requestCode(tag, environmentId, threadId),
+        replyIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
+      )
+      val remoteInput = RemoteInput.Builder(T3AgentReplyReceiver.KEY_TEXT_REPLY)
+        .setLabel("Reply to T3")
+        .build()
+      return Notification.Action.Builder(
+        android.R.drawable.ic_menu_send,
+        "Reply",
+        replyPendingIntent,
+      ).apply {
+        addRemoteInput(remoteInput)
+        setAllowGeneratedReplies(true)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+          setSemanticAction(Notification.Action.SEMANTIC_ACTION_REPLY)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+          setAuthenticationRequired(true)
         }
       }.build()
     }

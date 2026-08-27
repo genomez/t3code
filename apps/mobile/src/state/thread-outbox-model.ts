@@ -47,6 +47,9 @@ export const QueuedThreadMessageSchema = Schema.Struct({
   modelSelection: Schema.optional(ModelSelection),
   runtimeMode: Schema.optional(RuntimeMode),
   interactionMode: Schema.optional(ProviderInteractionMode),
+  // Notification direct replies refer to a completed turn and must not steer
+  // a newer turn that started after the notification was posted.
+  deferWhileBusy: Schema.optional(Schema.Boolean),
   // Present when the queued item creates a brand-new thread (pending task)
   // instead of appending a turn to an existing one.
   creation: Schema.optional(QueuedThreadCreationSchema),
@@ -76,6 +79,7 @@ export interface QueuedThreadMessage {
   readonly modelSelection?: ModelSelectionType;
   readonly runtimeMode?: RuntimeModeType;
   readonly interactionMode?: ProviderInteractionModeType;
+  readonly deferWhileBusy?: boolean;
   readonly creation?: QueuedThreadCreation;
   readonly createdAt: string;
 }
@@ -154,6 +158,7 @@ export function resolveThreadOutboxDeliveryAction(input: {
   readonly shellStatus: EnvironmentShellStatus;
   readonly environmentConnected: boolean;
   readonly threadBusy: boolean;
+  readonly deferWhileBusy?: boolean;
 }): ThreadOutboxDeliveryAction {
   if (input.isCreation) {
     // A pending task creates its thread on delivery. If the thread already
@@ -168,6 +173,9 @@ export function resolveThreadOutboxDeliveryAction(input: {
   }
   if (!input.threadExists) {
     return input.shellStatus === "live" ? "remove" : "wait";
+  }
+  if (input.threadBusy && input.deferWhileBusy === true) {
+    return "wait";
   }
   return input.environmentConnected ? "send" : "wait";
 }

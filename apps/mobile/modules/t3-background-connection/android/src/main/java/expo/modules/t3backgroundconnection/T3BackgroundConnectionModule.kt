@@ -16,6 +16,9 @@ class T3BackgroundConnectionModule : Module() {
   private val stopRequestListener: () -> Unit = {
     sendEvent(T3BackgroundConnectionState.STOP_REQUEST_EVENT)
   }
+  private val agentReplyAvailableListener: () -> Unit = {
+    sendEvent(T3BackgroundConnectionState.AGENT_REPLY_AVAILABLE_EVENT)
+  }
 
   override fun definition() = ModuleDefinition {
     Name("T3BackgroundConnection")
@@ -23,6 +26,7 @@ class T3BackgroundConnectionModule : Module() {
     Events(
       T3BackgroundConnectionState.STATUS_EVENT,
       T3BackgroundConnectionState.STOP_REQUEST_EVENT,
+      T3BackgroundConnectionState.AGENT_REPLY_AVAILABLE_EVENT,
     )
 
     OnCreate {
@@ -30,11 +34,13 @@ class T3BackgroundConnectionModule : Module() {
       T3BackgroundConnectionState.initialize(context)
       T3BackgroundConnectionState.addStatusListener(statusListener)
       T3BackgroundConnectionState.addStopRequestListener(stopRequestListener)
+      T3BackgroundConnectionState.addAgentReplyAvailableListener(agentReplyAvailableListener)
     }
 
     OnDestroy {
       T3BackgroundConnectionState.removeStatusListener(statusListener)
       T3BackgroundConnectionState.removeStopRequestListener(stopRequestListener)
+      T3BackgroundConnectionState.removeAgentReplyAvailableListener(agentReplyAvailableListener)
     }
 
     OnActivityEntersForeground {
@@ -65,18 +71,34 @@ class T3BackgroundConnectionModule : Module() {
       T3BackgroundConnectionState.status(context)
     }
 
-    Function("postAgentNotification") { tag: String, title: String, body: String, deepLink: String ->
+    Function("postAgentNotification") {
+      tag: String,
+      title: String,
+      body: String,
+      deepLink: String,
+      environmentId: String,
+      threadId: String ->
       T3BackgroundConnectionService.postAgentNotification(
         applicationContext(),
         tag,
         title,
         body,
         deepLink,
+        environmentId,
+        threadId,
       )
     }
 
     Function("dismissAgentNotification") { tag: String ->
       T3BackgroundConnectionService.dismissAgentNotification(applicationContext(), tag)
+    }
+
+    Function("getPendingAgentReplies") {
+      T3AgentReplyStore.pending(applicationContext()).map(T3AgentReply::toMap)
+    }
+
+    Function("acknowledgeAgentReply") { replyId: String ->
+      T3AgentReplyStore.acknowledge(applicationContext(), replyId)
     }
 
     AsyncFunction("setEnabled") { enabled: Boolean ->

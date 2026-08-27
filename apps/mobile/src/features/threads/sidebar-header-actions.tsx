@@ -1,10 +1,9 @@
 import { SymbolView } from "../../components/AppSymbol";
-import { Platform, Pressable, View } from "react-native";
+import { Pressable, View } from "react-native";
 
 import { useThemeColor } from "../../lib/useThemeColor";
 
 export interface SidebarHeaderActionsProps {
-  readonly onStartNewTask: () => void;
   readonly onOpenSettings: () => void;
 }
 
@@ -31,13 +30,6 @@ function FallbackHeaderButton(props: {
 export function SidebarHeaderActions(props: SidebarHeaderActionsProps) {
   return (
     <View className="flex-row items-center gap-0.5">
-      {Platform.OS !== "android" ? (
-        <FallbackHeaderButton
-          accessibilityLabel="New Task"
-          icon="square.and.pencil"
-          onPress={props.onStartNewTask}
-        />
-      ) : null}
       <FallbackHeaderButton
         accessibilityLabel="Open settings"
         icon="gearshape"

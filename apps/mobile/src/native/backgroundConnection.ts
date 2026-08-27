@@ -13,9 +13,18 @@ export interface BackgroundConnectionNotificationContent {
   readonly body: string;
 }
 
+export interface AgentNotificationReply {
+  readonly replyId: string;
+  readonly environmentId: string;
+  readonly threadId: string;
+  readonly text: string;
+  readonly createdAtEpochMs: number;
+}
+
 type BackgroundConnectionNativeEvents = {
   readonly onStatusChange: (status: BackgroundConnectionStatus) => void;
   readonly onStopRequested: () => void;
+  readonly onAgentReplyAvailable: () => void;
 };
 
 declare class BackgroundConnectionNativeModule extends NativeModule<BackgroundConnectionNativeEvents> {
@@ -31,8 +40,12 @@ declare class BackgroundConnectionNativeModule extends NativeModule<BackgroundCo
     title: string,
     body: string,
     deepLink: string,
+    environmentId: string,
+    threadId: string,
   ) => void;
   readonly dismissAgentNotification?: (tag: string) => void;
+  readonly getPendingAgentReplies?: () => ReadonlyArray<unknown>;
+  readonly acknowledgeAgentReply?: (replyId: string) => boolean;
   readonly ensureStarted?: () => BackgroundConnectionStatus;
   readonly requestBatteryOptimizationExemption?: () => Promise<BackgroundConnectionStatus>;
   readonly setRuntimeReady?: (ready: boolean) => BackgroundConnectionStatus;
@@ -131,12 +144,54 @@ export function postBackgroundConnectionAgentNotification(
   title: string,
   body: string,
   deepLink: string,
+  environmentId: string,
+  threadId: string,
 ): boolean {
   try {
     const nativeModule = getNativeModule();
     if (!nativeModule?.postAgentNotification) return false;
-    nativeModule.postAgentNotification(tag, title, body, deepLink);
+    nativeModule.postAgentNotification(tag, title, body, deepLink, environmentId, threadId);
     return true;
+  } catch {
+    return false;
+  }
+}
+
+function normalizeAgentNotificationReply(value: unknown): AgentNotificationReply | null {
+  if (typeof value !== "object" || value === null) return null;
+  const reply = value as Record<string, unknown>;
+  if (
+    typeof reply.replyId !== "string" ||
+    typeof reply.environmentId !== "string" ||
+    typeof reply.threadId !== "string" ||
+    typeof reply.text !== "string" ||
+    typeof reply.createdAtEpochMs !== "number" ||
+    !Number.isFinite(reply.createdAtEpochMs)
+  ) {
+    return null;
+  }
+  return {
+    replyId: reply.replyId,
+    environmentId: reply.environmentId,
+    threadId: reply.threadId,
+    text: reply.text,
+    createdAtEpochMs: reply.createdAtEpochMs,
+  };
+}
+
+export function getPendingAgentNotificationReplies(): ReadonlyArray<AgentNotificationReply> {
+  try {
+    return (getNativeModule()?.getPendingAgentReplies?.() ?? [])
+      .map(normalizeAgentNotificationReply)
+      .filter((reply): reply is AgentNotificationReply => reply !== null);
+  } catch {
+    return [];
+  }
+}
+
+export function acknowledgeAgentNotificationReply(replyId: string): boolean {
+  try {
+    return getNativeModule()?.acknowledgeAgentReply?.(replyId) === true;
   } catch {
     return false;
   }
@@ -204,6 +259,16 @@ export function addBackgroundConnectionStopRequestListener(
 ): BackgroundConnectionSubscription {
   try {
     return getNativeModule()?.addListener("onStopRequested", listener) ?? NOOP_SUBSCRIPTION;
+  } catch {
+    return NOOP_SUBSCRIPTION;
+  }
+}
+
+export function addAgentNotificationReplyAvailableListener(
+  listener: () => void,
+): BackgroundConnectionSubscription {
+  try {
+    return getNativeModule()?.addListener("onAgentReplyAvailable", listener) ?? NOOP_SUBSCRIPTION;
   } catch {
     return NOOP_SUBSCRIPTION;
   }

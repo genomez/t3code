@@ -18,6 +18,7 @@ internal object T3BackgroundConnectionState {
   const val TASK_NAME = "T3BackgroundConnection"
   const val STATUS_EVENT = "onStatusChange"
   const val STOP_REQUEST_EVENT = "onStopRequested"
+  const val AGENT_REPLY_AVAILABLE_EVENT = "onAgentReplyAvailable"
   const val RESTART_ACTION =
     "expo.modules.t3backgroundconnection.action.RESTART_BACKGROUND_CONNECTION"
 
@@ -32,6 +33,7 @@ internal object T3BackgroundConnectionState {
   private val taskStarted = AtomicBoolean(false)
   private val statusListeners = CopyOnWriteArraySet<(Map<String, Any>) -> Unit>()
   private val stopRequestListeners = CopyOnWriteArraySet<() -> Unit>()
+  private val agentReplyAvailableListeners = CopyOnWriteArraySet<() -> Unit>()
 
   @Volatile
   private var applicationContext: Context? = null
@@ -110,6 +112,20 @@ internal object T3BackgroundConnectionState {
 
   fun removeStopRequestListener(listener: () -> Unit) {
     stopRequestListeners.remove(listener)
+  }
+
+  fun addAgentReplyAvailableListener(listener: () -> Unit) {
+    agentReplyAvailableListeners.add(listener)
+  }
+
+  fun removeAgentReplyAvailableListener(listener: () -> Unit) {
+    agentReplyAvailableListeners.remove(listener)
+  }
+
+  fun emitAgentReplyAvailable() {
+    mainHandler.post {
+      agentReplyAvailableListeners.forEach { listener -> listener() }
+    }
   }
 
   fun refreshStatus() {
